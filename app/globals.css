@@ -765,29 +765,65 @@ label:focus-within {
   width: 100%;
 }
 
-.placed-photo img.rotated {
-  left: 100%;
+.placed-photo img.turn-1,
+.placed-photo img.turn-2,
+.placed-photo img.turn-3 {
   max-width: none;
   position: absolute;
-  top: 0;
-  transform: rotate(90deg);
   transform-origin: 0 0;
 }
 
-.rotation-badge {
+.placed-photo img.turn-1 {
+  left: 100%;
+  top: 0;
+  transform: rotate(90deg);
+}
+
+.placed-photo img.turn-2 {
+  left: 100%;
+  top: 100%;
+  transform: rotate(180deg);
+}
+
+.placed-photo img.turn-3 {
+  left: 0;
+  top: 100%;
+  transform: rotate(-90deg);
+}
+
+.rotation-button {
   align-items: center;
   background: rgb(31 41 36 / 72%);
+  border: 0;
   border-radius: 50%;
   color: white;
+  cursor: pointer;
   display: flex;
   font-size: clamp(7px, 0.8vw, 11px);
   height: clamp(14px, 1.5vw, 20px);
   justify-content: center;
+  padding: 0;
   position: absolute;
   right: 4px;
   top: 4px;
+  transition:
+    background 140ms ease,
+    transform 140ms ease;
   width: clamp(14px, 1.5vw, 20px);
   z-index: 3;
+}
+
+.rotation-button:hover {
+  background: var(--coral);
+  transform: scale(1.08);
+}
+
+.rotation-button:focus-visible {
+  outline-color: white;
+}
+
+.placed-photo.is-resizing {
+  box-shadow: 0 0 0 2px rgb(212 124 99 / 28%);
 }
 
 .resize-handle {

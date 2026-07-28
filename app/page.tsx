@@ -14,6 +14,8 @@ type Photo = {
   name: string;
   src: string;
   ratio: number;
+  rotationTurns: number;
+  manualRotation: boolean;
   naturalWidth: number;
   naturalHeight: number;
   widthMm: number;
@@ -34,6 +36,7 @@ type PackItem = {
   copy: number;
   widthMm: number;
   heightMm: number;
+  allowAutoRotation: boolean;
 };
 
 type Placement = PackItem & {
@@ -83,6 +86,7 @@ function expandPhotos(photos: Photo[]): PackItem[] {
       copy: index + 1,
       widthMm: photo.widthMm,
       heightMm: photo.heightMm,
+      allowAutoRotation: !photo.manualRotation,
     })),
   );
 }
@@ -198,6 +202,7 @@ function findCandidate(
 
       if (
         allowRotation &&
+        item.allowAutoRotation &&
         Math.abs(item.widthMm - item.heightMm) > EPSILON
       ) {
         orientations.push({
@@ -286,6 +291,7 @@ function packWithOrder(
       item.heightMm <= usableHeight + EPSILON;
     const fitsRotated =
       settings.allowRotation &&
+      item.allowAutoRotation &&
       item.heightMm <= usableWidth + EPSILON &&
       item.widthMm <= usableHeight + EPSILON;
 
@@ -411,7 +417,6 @@ export default function Home() {
   } | null>(null);
   const [resizeDraft, setResizeDraft] = useState<{
     key: string;
-    scale: number;
     corner: ResizeCorner;
   } | null>(null);
   const objectUrls = useRef(new Set<string>());
@@ -466,6 +471,8 @@ export default function Home() {
                 name: file.name,
                 src,
                 ratio,
+                rotationTurns: 0,
+                manualRotation: false,
                 naturalWidth: image.naturalWidth,
                 naturalHeight: image.naturalHeight,
                 widthMm: roundMm(widthMm),
@@ -587,6 +594,24 @@ export default function Home() {
     setSettings((current) => ({ ...current, [key]: value }));
   }
 
+  function rotatePhoto(photoId: string) {
+    setPhotos((current) =>
+      current.map((photo) =>
+        photo.id === photoId
+          ? {
+              ...photo,
+              ratio: 1 / photo.ratio,
+              rotationTurns: (photo.rotationTurns + 1) % 4,
+              manualRotation: true,
+              widthMm: photo.heightMm,
+              heightMm: photo.widthMm,
+            }
+          : photo,
+      ),
+    );
+    setMessage("照片已顺时针旋转 90°，版面已重新优化。");
+  }
+
   function beginDirectResize(
     event: ReactPointerEvent<HTMLButtonElement>,
     photo: Photo,
@@ -615,8 +640,6 @@ export default function Home() {
     const startHeight = photo.heightMm;
     const minScale = Math.max(10 / startWidth, 10 / startHeight);
     const maxScale = Math.min(400 / startWidth, 400 / startHeight);
-    let finalWidth = startWidth;
-    let finalHeight = startHeight;
 
     const handlePointerMove = (moveEvent: PointerEvent) => {
       const currentDistance = Math.hypot(
@@ -629,9 +652,19 @@ export default function Home() {
       );
       const widthMm = roundMm(startWidth * scale);
       const heightMm = roundMm(startHeight * scale);
-      finalWidth = widthMm;
-      finalHeight = heightMm;
-      setResizeDraft({ key: placement.key, scale, corner });
+      setResizeDraft({ key: placement.key, corner });
+      setPhotos((current) =>
+        current.map((item) =>
+          item.id === photo.id &&
+          (item.widthMm !== widthMm || item.heightMm !== heightMm)
+            ? {
+                ...item,
+                widthMm,
+                heightMm,
+              }
+            : item,
+        ),
+      );
       setResizeHint({
         x: moveEvent.clientX + 14,
         y: moveEvent.clientY + 14,
@@ -643,21 +676,10 @@ export default function Home() {
       window.removeEventListener("pointermove", handlePointerMove);
       window.removeEventListener("pointerup", handlePointerUp);
       window.removeEventListener("pointercancel", handlePointerUp);
-      setPhotos((current) =>
-        current.map((item) =>
-          item.id === photo.id
-            ? {
-                ...item,
-                widthMm: finalWidth,
-                heightMm: finalHeight,
-              }
-            : item,
-        ),
-      );
       setResizeDraft(null);
       setResizeHint(null);
       setMessage(
-        `已直接缩放 ${photo.name}，并重新计算最省纸的排列。`,
+        `已完成缩放 ${photo.name}，版面在拖动过程中已实时更新。`,
       );
     };
 
@@ -716,27 +738,29 @@ export default function Home() {
           const x = (settings.margin + placement.x) * scale;
           const y = (settings.margin + placement.y) * scale;
 
-          if (placement.rotated) {
-            context.save();
-            context.translate(x + placement.width * scale, y);
+          const width = placement.width * scale;
+          const height = placement.height * scale;
+          const totalTurns =
+            (photo.rotationTurns + (placement.rotated ? 1 : 0)) % 4;
+
+          context.save();
+          context.translate(x, y);
+          if (totalTurns === 1) {
+            context.translate(width, 0);
             context.rotate(Math.PI / 2);
-            context.drawImage(
-              image,
-              0,
-              0,
-              photo.widthMm * scale,
-              photo.heightMm * scale,
-            );
-            context.restore();
+            context.drawImage(image, 0, 0, height, width);
+          } else if (totalTurns === 2) {
+            context.translate(width, height);
+            context.rotate(Math.PI);
+            context.drawImage(image, 0, 0, width, height);
+          } else if (totalTurns === 3) {
+            context.translate(0, height);
+            context.rotate(-Math.PI / 2);
+            context.drawImage(image, 0, 0, height, width);
           } else {
-            context.drawImage(
-              image,
-              x,
-              y,
-              placement.width * scale,
-              placement.height * scale,
-            );
+            context.drawImage(image, 0, 0, width, height);
           }
+          context.restore();
         });
 
         const pageImage = canvas.toDataURL("image/jpeg", 0.96);
@@ -1120,22 +1144,20 @@ export default function Home() {
                         if (!photo) return null;
                         const isSelected =
                           selectedPlacementKey === placement.key;
-                        const activeResize =
-                          resizeDraft?.key === placement.key
-                            ? resizeDraft
-                            : null;
-                        const transformOrigin = activeResize
-                          ? {
-                              nw: "right bottom",
-                              ne: "left bottom",
-                              sw: "right top",
-                              se: "left top",
-                            }[activeResize.corner]
-                          : undefined;
+                        const totalTurns =
+                          (photo.rotationTurns +
+                            (placement.rotated ? 1 : 0)) %
+                          4;
+                        const isQuarterTurn =
+                          totalTurns === 1 || totalTurns === 3;
                         return (
                           <div
                             className={`placed-photo ${
                               isSelected ? "is-selected" : ""
+                            } ${
+                              resizeDraft?.key === placement.key
+                                ? "is-resizing"
+                                : ""
                             }`}
                             key={placement.key}
                             role="button"
@@ -1177,21 +1199,15 @@ export default function Home() {
                               height: `${
                                 (placement.height / paper.height) * 100
                               }%`,
-                              transform: activeResize
-                                ? `scale(${activeResize.scale})`
-                                : undefined,
-                              transformOrigin,
                             }}
                           >
                             {/* eslint-disable-next-line @next/next/no-img-element */}
                             <img
                               src={photo.src}
                               alt={photo.name}
-                              className={
-                                placement.rotated ? "rotated" : undefined
-                              }
+                              className={`turn-${totalTurns}`}
                               style={
-                                placement.rotated
+                                isQuarterTurn
                                   ? {
                                       width: `${
                                         (placement.height / placement.width) *
@@ -1205,9 +1221,19 @@ export default function Home() {
                                   : undefined
                               }
                             />
-                            {placement.rotated && (
-                              <span className="rotation-badge">↻</span>
-                            )}
+                            <button
+                              type="button"
+                              className="rotation-button"
+                              aria-label={`将 ${photo.name} 顺时针旋转 90 度`}
+                              title="顺时针旋转 90°"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                rotatePhoto(photo.id);
+                              }}
+                              onPointerDown={(event) => event.stopPropagation()}
+                            >
+                              ↻
+                            </button>
                             {isSelected && (
                               <>
                                 <span className="direct-size-badge">
