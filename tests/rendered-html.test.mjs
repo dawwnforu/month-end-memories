@@ -50,10 +50,11 @@ test("implements safe photo keyboard shortcuts and undo", async () => {
   assert.match(page, /event\.key === "-"/);
   assert.match(page, /event\.key\.toLowerCase\(\) === "r"/);
   assert.match(page, /undoLastAction\(\)/);
-  assert.match(page, /setShowShortcutHelp\(true\)/);
+  assert.match(page, /shortcutGuideRef/);
   assert.match(page, /长边增加 1 mm/);
   assert.match(page, /所有页面快捷键都会自动停用/);
-  assert.match(css, /\.shortcut-modal/);
+  assert.match(css, /\.shortcut-guide/);
+  assert.doesNotMatch(page, /shortcut-modal/);
   assert.match(css, /\.shortcut-actions/);
   assert.match(readme, /## 快捷键/);
 });

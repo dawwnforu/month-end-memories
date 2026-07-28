@@ -456,7 +456,6 @@ export default function Home() {
   const [duplicateNotice, setDuplicateNotice] = useState<{
     count: number;
   } | null>(null);
-  const [showShortcutHelp, setShowShortcutHelp] = useState(false);
   const [undoDepth, setUndoDepth] = useState(0);
   const [selectedPlacementKey, setSelectedPlacementKey] = useState<
     string | null
@@ -477,6 +476,7 @@ export default function Home() {
   const photosRef = useRef(photos);
   const settingsRef = useRef(settings);
   const selectedPlacementKeyRef = useRef(selectedPlacementKey);
+  const shortcutGuideRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     photosRef.current = photos;
@@ -930,14 +930,6 @@ export default function Home() {
         return;
       }
 
-      if (showShortcutHelp) {
-        if (event.key === "Escape" || event.key === "?") {
-          event.preventDefault();
-          setShowShortcutHelp(false);
-        }
-        return;
-      }
-
       if (
         (event.ctrlKey || event.metaKey) &&
         !event.altKey &&
@@ -950,7 +942,11 @@ export default function Home() {
 
       if (event.key === "?") {
         event.preventDefault();
-        setShowShortcutHelp(true);
+        shortcutGuideRef.current?.scrollIntoView({
+          behavior: "smooth",
+          block: "nearest",
+        });
+        shortcutGuideRef.current?.focus({ preventScroll: true });
         return;
       }
 
@@ -1125,74 +1121,6 @@ export default function Home() {
             >
               知道了
             </button>
-          </section>
-        </div>
-      )}
-      {showShortcutHelp && (
-        <div
-          className="shortcut-modal-layer"
-          role="presentation"
-          onMouseDown={() => setShowShortcutHelp(false)}
-        >
-          <section
-            className="shortcut-modal"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="shortcut-modal-title"
-            aria-describedby="shortcut-modal-description"
-            onMouseDown={(event) => event.stopPropagation()}
-          >
-            <div className="shortcut-modal-heading">
-              <div>
-                <span className="eyebrow">键盘操作</span>
-                <h2 id="shortcut-modal-title">快捷键帮助</h2>
-              </div>
-              <button
-                type="button"
-                className="shortcut-modal-close"
-                aria-label="关闭快捷键帮助"
-                onClick={() => setShowShortcutHelp(false)}
-                autoFocus
-              >
-                ×
-              </button>
-            </div>
-            <p id="shortcut-modal-description">
-              先在 A4 预览中选中照片，再使用下列快捷键。
-            </p>
-            <dl className="shortcut-list">
-              <div>
-                <dt><kbd>Delete</kbd><kbd>Backspace</kbd></dt>
-                <dd>删除选中照片</dd>
-              </div>
-              <div>
-                <dt><kbd>＋</kbd></dt>
-                <dd>长边增加 1 mm</dd>
-              </div>
-              <div>
-                <dt><kbd>－</kbd></dt>
-                <dd>长边减少 1 mm</dd>
-              </div>
-              <div>
-                <dt><kbd>R</kbd></dt>
-                <dd>顺时针旋转 90°</dd>
-              </div>
-              <div>
-                <dt><kbd>Ctrl</kbd><span>/</span><kbd>⌘</kbd><span>＋</span><kbd>Z</kbd></dt>
-                <dd>撤销上一步</dd>
-              </div>
-              <div>
-                <dt><kbd>Esc</kbd></dt>
-                <dd>取消选择或关闭帮助</dd>
-              </div>
-              <div>
-                <dt><kbd>?</kbd></dt>
-                <dd>打开或关闭本帮助</dd>
-              </div>
-            </dl>
-            <div className="shortcut-safety-note">
-              宽、高、份数、边距或缝隙输入框获得焦点时，所有页面快捷键都会自动停用。
-            </div>
           </section>
         </div>
       )}
@@ -1517,8 +1445,14 @@ export default function Home() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setShowShortcutHelp(true)}
-                  title="查看快捷键（?）"
+                  onClick={() => {
+                    shortcutGuideRef.current?.scrollIntoView({
+                      behavior: "smooth",
+                      block: "nearest",
+                    });
+                    shortcutGuideRef.current?.focus({ preventScroll: true });
+                  }}
+                  title="定位右侧快捷键说明（?）"
                 >
                   ⌨ 快捷键
                 </button>
@@ -1541,6 +1475,56 @@ export default function Home() {
               </div>
             </div>
           </div>
+
+          <section
+            className="shortcut-guide"
+            id="shortcut-guide"
+            ref={shortcutGuideRef}
+            tabIndex={-1}
+            aria-labelledby="shortcut-guide-title"
+          >
+            <div className="shortcut-guide-heading">
+              <div>
+                <span className="eyebrow">键盘快捷操作</span>
+                <h3 id="shortcut-guide-title">先选中照片，再按键调整</h3>
+              </div>
+              <p>
+                光标位于尺寸、份数、边距或缝隙输入框时，所有页面快捷键都会自动停用。
+              </p>
+            </div>
+            <dl className="shortcut-guide-grid">
+              <div>
+                <dt><kbd>Delete</kbd><span>/</span><kbd>Backspace</kbd></dt>
+                <dd>删除选中照片</dd>
+              </div>
+              <div>
+                <dt><kbd>＋</kbd></dt>
+                <dd>长边增加 1 mm</dd>
+              </div>
+              <div>
+                <dt><kbd>－</kbd></dt>
+                <dd>长边减少 1 mm</dd>
+              </div>
+              <div>
+                <dt><kbd>R</kbd></dt>
+                <dd>顺时针旋转 90°</dd>
+              </div>
+              <div>
+                <dt>
+                  <kbd>Ctrl</kbd><span>/</span><kbd>⌘</kbd><span>＋</span><kbd>Z</kbd>
+                </dt>
+                <dd>撤销上一步</dd>
+              </div>
+              <div>
+                <dt><kbd>Esc</kbd></dt>
+                <dd>取消照片选择</dd>
+              </div>
+              <div>
+                <dt><kbd>?</kbd></dt>
+                <dd>定位本操作说明</dd>
+              </div>
+            </dl>
+          </section>
 
           <div className="preview-stage">
             {photos.length === 0 ? (
