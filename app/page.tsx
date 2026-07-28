@@ -456,9 +456,12 @@ export default function Home() {
   const photosRef = useRef(photos);
   const settingsRef = useRef(settings);
   const selectedPlacementKeyRef = useRef(selectedPlacementKey);
-  photosRef.current = photos;
-  settingsRef.current = settings;
-  selectedPlacementKeyRef.current = selectedPlacementKey;
+
+  useEffect(() => {
+    photosRef.current = photos;
+    settingsRef.current = settings;
+    selectedPlacementKeyRef.current = selectedPlacementKey;
+  }, [photos, settings, selectedPlacementKey]);
 
   const paper = A4[settings.orientation];
   const layout = useMemo(
@@ -651,6 +654,9 @@ export default function Home() {
       const validPhotos = loaded.filter(
         (photo): photo is Photo => photo !== null,
       );
+      if (validPhotos.length > 0) {
+        rememberForUndo();
+      }
       validPhotos.forEach((photo) => {
         knownFingerprints.current.set(
           photo.fingerprint,
@@ -698,6 +704,7 @@ export default function Home() {
     rawValue: number,
   ) {
     if (!Number.isFinite(rawValue)) return;
+    rememberForUndo();
     setSelectedPlacementKey(`${photoId}-0`);
     const value = Math.max(10, Math.min(400, rawValue));
     setPhotos((current) =>
@@ -720,6 +727,7 @@ export default function Home() {
   }
 
   function updateQuantity(photoId: string, quantity: number) {
+    rememberForUndo();
     setSelectedPlacementKey(`${photoId}-0`);
     setPhotos((current) =>
       current.map((photo) =>
@@ -734,30 +742,31 @@ export default function Home() {
   }
 
   function removePhoto(photoId: string) {
+    const target = photosRef.current.find((photo) => photo.id === photoId);
+    if (!target) return;
+    rememberForUndo();
     if (selectedPlacementKey?.startsWith(`${photoId}-`)) {
       setSelectedPlacementKey(null);
     }
     setPhotos((current) => {
-      const target = current.find((photo) => photo.id === photoId);
-      if (target) {
-        URL.revokeObjectURL(target.src);
-        objectUrls.current.delete(target.src);
-        knownFingerprints.current.delete(target.fingerprint);
-      }
+      knownFingerprints.current.delete(target.fingerprint);
       return current.filter((photo) => photo.id !== photoId);
     });
+    setMessage(`已删除 ${target.name}，可按 Ctrl/⌘ + Z 撤销。`);
   }
 
   function clearPhotos() {
-    objectUrls.current.forEach((url) => URL.revokeObjectURL(url));
-    objectUrls.current.clear();
+    if (!photosRef.current.length) return;
+    rememberForUndo();
     knownFingerprints.current.clear();
     setPhotos([]);
     setSelectedPlacementKey(null);
-    setMessage("");
+    setMessage("已清空照片，可按 Ctrl/⌘ + Z 撤销。");
   }
 
   function applyLongEdge(longEdge: number) {
+    if (!photosRef.current.length) return;
+    rememberForUndo();
     setPhotos((current) =>
       current.map((photo) => {
         const widthMm =
@@ -778,10 +787,14 @@ export default function Home() {
     key: K,
     value: Settings[K],
   ) {
+    if (settingsRef.current[key] === value) return;
+    rememberForUndo();
     setSettings((current) => ({ ...current, [key]: value }));
   }
 
   function rotatePhoto(photoId: string) {
+    if (!photosRef.current.some((photo) => photo.id === photoId)) return;
+    rememberForUndo();
     setPhotos((current) =>
       current.map((photo) =>
         photo.id === photoId
@@ -807,6 +820,7 @@ export default function Home() {
   ) {
     event.preventDefault();
     event.stopPropagation();
+    rememberForUndo();
     const placedElement = event.currentTarget.closest(
       ".placed-photo",
     ) as HTMLElement | null;
@@ -874,6 +888,71 @@ export default function Home() {
     window.addEventListener("pointerup", handlePointerUp);
     window.addEventListener("pointercancel", handlePointerUp);
   }
+
+  useEffect(() => {
+    const handleShortcut = (event: KeyboardEvent) => {
+      if (isEditableTarget(event.target)) return;
+
+      if (duplicateNotice) {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          setDuplicateNotice(null);
+        }
+        return;
+      }
+
+      if (showShortcutHelp) {
+        if (event.key === "Escape" || event.key === "?") {
+          event.preventDefault();
+          setShowShortcutHelp(false);
+        }
+        return;
+      }
+
+      if (
+        (event.ctrlKey || event.metaKey) &&
+        !event.altKey &&
+        event.key.toLowerCase() === "z"
+      ) {
+        event.preventDefault();
+        undoLastAction();
+        return;
+      }
+
+      if (event.key === "?") {
+        event.preventDefault();
+        setShowShortcutHelp(true);
+        return;
+      }
+
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setSelectedPlacementKey(null);
+        return;
+      }
+
+      if (event.ctrlKey || event.metaKey || event.altKey) return;
+      const selectedPhoto = getSelectedPhoto();
+      if (!selectedPhoto) return;
+
+      if (event.key === "Delete" || event.key === "Backspace") {
+        event.preventDefault();
+        removePhoto(selectedPhoto.id);
+      } else if (event.key === "+" || event.code === "NumpadAdd") {
+        event.preventDefault();
+        resizePhotoByKeyboard(selectedPhoto.id, 1);
+      } else if (event.key === "-" || event.code === "NumpadSubtract") {
+        event.preventDefault();
+        resizePhotoByKeyboard(selectedPhoto.id, -1);
+      } else if (event.key.toLowerCase() === "r") {
+        event.preventDefault();
+        rotatePhoto(selectedPhoto.id);
+      }
+    };
+
+    window.addEventListener("keydown", handleShortcut);
+    return () => window.removeEventListener("keydown", handleShortcut);
+  });
 
   async function exportPdf() {
     if (!layout.pages.length || layout.unplaced.length) return;
@@ -1015,6 +1094,74 @@ export default function Home() {
             >
               知道了
             </button>
+          </section>
+        </div>
+      )}
+      {showShortcutHelp && (
+        <div
+          className="shortcut-modal-layer"
+          role="presentation"
+          onMouseDown={() => setShowShortcutHelp(false)}
+        >
+          <section
+            className="shortcut-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="shortcut-modal-title"
+            aria-describedby="shortcut-modal-description"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="shortcut-modal-heading">
+              <div>
+                <span className="eyebrow">键盘操作</span>
+                <h2 id="shortcut-modal-title">快捷键帮助</h2>
+              </div>
+              <button
+                type="button"
+                className="shortcut-modal-close"
+                aria-label="关闭快捷键帮助"
+                onClick={() => setShowShortcutHelp(false)}
+                autoFocus
+              >
+                ×
+              </button>
+            </div>
+            <p id="shortcut-modal-description">
+              先在 A4 预览中选中照片，再使用下列快捷键。
+            </p>
+            <dl className="shortcut-list">
+              <div>
+                <dt><kbd>Delete</kbd><kbd>Backspace</kbd></dt>
+                <dd>删除选中照片</dd>
+              </div>
+              <div>
+                <dt><kbd>＋</kbd></dt>
+                <dd>长边增加 1 mm</dd>
+              </div>
+              <div>
+                <dt><kbd>－</kbd></dt>
+                <dd>长边减少 1 mm</dd>
+              </div>
+              <div>
+                <dt><kbd>R</kbd></dt>
+                <dd>顺时针旋转 90°</dd>
+              </div>
+              <div>
+                <dt><kbd>Ctrl</kbd><span>/</span><kbd>⌘</kbd><span>＋</span><kbd>Z</kbd></dt>
+                <dd>撤销上一步</dd>
+              </div>
+              <div>
+                <dt><kbd>Esc</kbd></dt>
+                <dd>取消选择或关闭帮助</dd>
+              </div>
+              <div>
+                <dt><kbd>?</kbd></dt>
+                <dd>打开或关闭本帮助</dd>
+              </div>
+            </dl>
+            <div className="shortcut-safety-note">
+              宽、高、份数、边距或缝隙输入框获得焦点时，所有页面快捷键都会自动停用。
+            </div>
           </section>
         </div>
       )}
@@ -1282,12 +1429,29 @@ export default function Home() {
 
         <section className="preview-panel">
           <div className="preview-header">
-            <div>
+            <div className="preview-heading">
               <span className="eyebrow">03 · 自动排版</span>
               <h2>A4 打印预览</h2>
               <p className="preview-instruction">
                 点击照片，拖动四角控制点即可等比例缩放
               </p>
+              <div className="shortcut-actions">
+                <button
+                  type="button"
+                  onClick={undoLastAction}
+                  disabled={undoDepth === 0}
+                  title="撤销上一步（Ctrl/⌘ + Z）"
+                >
+                  ↶ 撤销
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowShortcutHelp(true)}
+                  title="查看快捷键（?）"
+                >
+                  ⌨ 快捷键
+                </button>
+              </div>
             </div>
             <div className="layout-stats">
               <div>

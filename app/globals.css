@@ -123,6 +123,131 @@ label:focus-within {
   background: var(--sage-dark);
 }
 
+.shortcut-modal-layer {
+  align-items: center;
+  background: rgb(32 48 41 / 46%);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding: 24px;
+  position: fixed;
+  z-index: 1000;
+  backdrop-filter: blur(6px);
+}
+
+.shortcut-modal {
+  background: var(--paper);
+  border: 1px solid rgb(111 132 110 / 22%);
+  border-radius: 18px;
+  box-shadow: 0 28px 80px rgb(32 48 41 / 30%);
+  max-height: min(720px, calc(100vh - 48px));
+  max-width: 510px;
+  overflow: auto;
+  padding: 28px 30px 30px;
+  width: 100%;
+}
+
+.shortcut-modal-heading {
+  align-items: flex-start;
+  display: flex;
+  justify-content: space-between;
+}
+
+.shortcut-modal-heading h2 {
+  font-family: "STKaiti", "KaiTi", serif;
+  font-size: 24px;
+  letter-spacing: 0.04em;
+  margin: 0;
+}
+
+.shortcut-modal-close {
+  align-items: center;
+  background: #f1eee8;
+  border: 0;
+  border-radius: 50%;
+  color: var(--ink-soft);
+  cursor: pointer;
+  display: flex;
+  font-size: 20px;
+  height: 32px;
+  justify-content: center;
+  line-height: 1;
+  padding: 0 0 2px;
+  width: 32px;
+}
+
+.shortcut-modal-close:hover {
+  background: #eee5e0;
+  color: var(--coral);
+}
+
+.shortcut-modal > p {
+  color: var(--ink-soft);
+  font-size: 12px;
+  margin: 10px 0 18px;
+}
+
+.shortcut-list {
+  border-bottom: 1px solid var(--line);
+  border-top: 1px solid var(--line);
+  margin: 0;
+}
+
+.shortcut-list > div {
+  align-items: center;
+  border-bottom: 1px solid rgb(216 211 201 / 65%);
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(176px, 1fr) 1fr;
+  padding: 10px 2px;
+}
+
+.shortcut-list > div:last-child {
+  border-bottom: 0;
+}
+
+.shortcut-list dt {
+  align-items: center;
+  display: flex;
+  gap: 5px;
+}
+
+.shortcut-list dt span {
+  color: #aaa59c;
+  font-size: 10px;
+}
+
+.shortcut-list dd {
+  color: var(--ink-soft);
+  font-size: 12px;
+  margin: 0;
+}
+
+kbd {
+  background: linear-gradient(#fff, #f0ede7);
+  border: 1px solid #cbc6bc;
+  border-bottom-width: 2px;
+  border-radius: 6px;
+  box-shadow: 0 1px 1px rgb(32 48 41 / 7%);
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 10px;
+  font-weight: 750;
+  min-width: 27px;
+  padding: 4px 7px;
+  text-align: center;
+}
+
+.shortcut-safety-note {
+  background: var(--sage-pale);
+  border-radius: 9px;
+  color: var(--sage-dark);
+  font-size: 11px;
+  line-height: 1.65;
+  margin-top: 18px;
+  padding: 10px 12px;
+}
+
 .topbar {
   align-items: center;
   background: rgb(255 253 249 / 90%);
@@ -641,6 +766,10 @@ label:focus-within {
   padding: 20px clamp(26px, 3vw, 48px);
 }
 
+.preview-heading {
+  min-width: 0;
+}
+
 .layout-stats {
   display: flex;
   gap: clamp(18px, 3vw, 42px);
@@ -650,6 +779,33 @@ label:focus-within {
   color: var(--ink-soft);
   font-size: 10px;
   margin: 6px 0 0;
+}
+
+.shortcut-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 9px;
+}
+
+.shortcut-actions button {
+  background: rgb(255 253 249 / 72%);
+  border: 1px solid #d7d2c8;
+  border-radius: 7px;
+  color: var(--ink-soft);
+  cursor: pointer;
+  font-size: 10px;
+  padding: 5px 8px;
+}
+
+.shortcut-actions button:hover:not(:disabled) {
+  background: var(--paper);
+  border-color: #bfc9ba;
+  color: var(--ink);
+}
+
+.shortcut-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
 }
 
 .layout-stats > div {
@@ -1091,6 +1247,15 @@ label:focus-within {
 }
 
 @media (max-width: 820px) {
+  .shortcut-modal {
+    padding: 23px 20px 24px;
+  }
+
+  .shortcut-list > div {
+    gap: 10px;
+    grid-template-columns: minmax(145px, 1fr) 1fr;
+  }
+
   .topbar {
     position: relative;
   }
@@ -1155,6 +1320,8 @@ label:focus-within {
   .preview-header,
   .export-bar,
   .warning-banner,
+  .duplicate-modal-layer,
+  .shortcut-modal-layer,
   .page-label {
     display: none !important;
   }
