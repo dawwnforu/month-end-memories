@@ -782,7 +782,7 @@ export default function Home() {
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               className="brand-logo"
-              src="/brand-logo-v2.png"
+              src="/brand-logo-v3.png"
               alt="月末拾光"
             />
             <h1 className="visually-hidden">月末拾光</h1>
