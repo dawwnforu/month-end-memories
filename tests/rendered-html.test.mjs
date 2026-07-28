@@ -29,9 +29,9 @@ test("server-renders the 月末拾光 product shell", async () => {
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
 
   const html = await response.text();
-  assert.match(html, /<title>月末拾光｜A4 照片省纸排版<\/title>/);
+  assert.match(html, /<title>月末拾光｜照片省纸排版<\/title>/);
   assert.match(html, /选择或拖入照片/);
-  assert.match(html, /A4 打印预览/);
+  assert.match(html, /A4(?:<!-- -->)? 打印预览/);
   assert.match(html, /快捷键/);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape/);
 });

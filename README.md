@@ -1,4 +1,4 @@
-# 月末拾光
+# 月末拾光 · Month-End Memories
 
 一款面向手帐、照片墙和纸质纪念册制作的 A4 照片智能排版工具。导入照片、按毫米设置成品尺寸，系统会自动旋转并优化照片组合，尽可能减少 A4 纸留白，最后一键导出适合打印的高分辨率 PDF。
 
@@ -109,8 +109,8 @@
 ### 安装与启动
 
 ```bash
-git clone https://github.com/dawwnforu/yuemo-photo-sheet.git
-cd yuemo-photo-sheet
+git clone https://github.com/dawwnforu/month-end-memories.git
+cd month-end-memories
 npm install
 npm run dev
 ```

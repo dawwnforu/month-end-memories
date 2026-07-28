@@ -1212,7 +1212,7 @@ export default function Home() {
         <div className="topbar-actions">
           <a
             className="feedback-link"
-            href="https://github.com/dawwnforu/yuemo-photo-sheet/issues/new?template=feedback.yml"
+            href="https://github.com/dawwnforu/month-end-memories/issues/new?template=feedback.yml"
             target="_blank"
             rel="noreferrer"
           >
