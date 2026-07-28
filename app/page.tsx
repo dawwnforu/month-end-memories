@@ -519,6 +519,7 @@ export default function Home() {
     rawValue: number,
   ) {
     if (!Number.isFinite(rawValue)) return;
+    setSelectedPlacementKey(`${photoId}-0`);
     const value = Math.max(10, Math.min(400, rawValue));
     setPhotos((current) =>
       current.map((photo) => {
@@ -540,6 +541,7 @@ export default function Home() {
   }
 
   function updateQuantity(photoId: string, quantity: number) {
+    setSelectedPlacementKey(`${photoId}-0`);
     setPhotos((current) =>
       current.map((photo) =>
         photo.id === photoId
@@ -553,6 +555,9 @@ export default function Home() {
   }
 
   function removePhoto(photoId: string) {
+    if (selectedPlacementKey?.startsWith(`${photoId}-`)) {
+      setSelectedPlacementKey(null);
+    }
     setPhotos((current) => {
       const target = current.find((photo) => photo.id === photoId);
       if (target) {
@@ -567,6 +572,7 @@ export default function Home() {
     objectUrls.current.forEach((url) => URL.revokeObjectURL(url));
     objectUrls.current.clear();
     setPhotos([]);
+    setSelectedPlacementKey(null);
     setMessage("");
   }
 
@@ -875,7 +881,14 @@ export default function Home() {
 
                 <div className="photo-list">
                   {photos.map((photo, index) => (
-                    <article className="photo-card" key={photo.id}>
+                    <article
+                      className={`photo-card ${
+                        selectedPlacementKey?.startsWith(`${photo.id}-`)
+                          ? "is-selected"
+                          : ""
+                      }`}
+                      key={photo.id}
+                    >
                       <div className="photo-thumb">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img src={photo.src} alt="" />
@@ -1228,6 +1241,7 @@ export default function Home() {
                               title="顺时针旋转 90°"
                               onClick={(event) => {
                                 event.stopPropagation();
+                                setSelectedPlacementKey(placement.key);
                                 rotatePhoto(photo.id);
                               }}
                               onPointerDown={(event) => event.stopPropagation()}

@@ -10,6 +10,7 @@
   --sage-dark: #526852;
   --sage-pale: #e3e9df;
   --coral: #d47c63;
+  --selection-blue: #2684ff;
   --line: #d8d3c9;
   --shadow: 0 18px 50px rgb(43 49 45 / 10%);
 }
@@ -302,6 +303,12 @@ label:focus-within {
   gap: 10px;
   grid-template-columns: 70px minmax(0, 1fr);
   padding: 8px;
+}
+
+.photo-card.is-selected {
+  background: #f1f7ff;
+  border-color: rgb(38 132 255 / 72%);
+  box-shadow: 0 0 0 2px rgb(38 132 255 / 12%);
 }
 
 .photo-thumb {
@@ -748,10 +755,12 @@ label:focus-within {
 }
 
 .placed-photo.is-selected::after {
-  border: 2px solid var(--sage-dark);
-  box-shadow: 0 0 0 1px rgb(255 255 255 / 82%);
+  border: 3px solid var(--selection-blue);
+  box-shadow:
+    0 0 0 2px rgb(255 255 255 / 92%),
+    0 0 0 6px rgb(38 132 255 / 20%);
   content: "";
-  inset: -2px;
+  inset: -3px;
   pointer-events: none;
   position: absolute;
   z-index: 4;
@@ -823,12 +832,12 @@ label:focus-within {
 }
 
 .placed-photo.is-resizing {
-  box-shadow: 0 0 0 2px rgb(212 124 99 / 28%);
+  box-shadow: 0 0 0 3px rgb(38 132 255 / 26%);
 }
 
 .resize-handle {
   background: white;
-  border: 2px solid var(--sage-dark);
+  border: 2px solid var(--selection-blue);
   border-radius: 50%;
   box-shadow: 0 1px 5px rgb(32 48 41 / 28%);
   height: 12px;
@@ -864,7 +873,7 @@ label:focus-within {
 }
 
 .direct-size-badge {
-  background: var(--ink);
+  background: var(--selection-blue);
   border-radius: 999px;
   bottom: calc(100% + 10px);
   color: white;
