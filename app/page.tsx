@@ -25,7 +25,18 @@ type Photo = {
   quantity: number;
 };
 
+type PaperSizeKey =
+  | "a3"
+  | "a4"
+  | "a5"
+  | "a6"
+  | "b5"
+  | "letter"
+  | "photo5"
+  | "photo6";
+
 type Settings = {
+  paperSize: PaperSizeKey;
   orientation: "portrait" | "landscape";
   margin: number;
   gap: number;
@@ -74,9 +85,18 @@ type PackResult = {
 
 type ResizeCorner = "nw" | "ne" | "sw" | "se";
 
-const A4 = {
-  portrait: { width: 210, height: 297 },
-  landscape: { width: 297, height: 210 },
+const PAPER_SIZES: Record<
+  PaperSizeKey,
+  { label: string; width: number; height: number }
+> = {
+  a3: { label: "A3", width: 297, height: 420 },
+  a4: { label: "A4", width: 210, height: 297 },
+  a5: { label: "A5", width: 148, height: 210 },
+  a6: { label: "A6", width: 105, height: 148 },
+  b5: { label: "B5", width: 176, height: 250 },
+  letter: { label: "Letter", width: 215.9, height: 279.4 },
+  photo5: { label: "5 寸照片纸", width: 89, height: 127 },
+  photo6: { label: "6 寸照片纸", width: 102, height: 152 },
 } as const;
 
 const LONG_EDGE_PRESETS = [50, 60, 70, 90];
@@ -424,6 +444,7 @@ function isEditableTarget(target: EventTarget | null) {
 export default function Home() {
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [settings, setSettings] = useState<Settings>({
+    paperSize: "a4",
     orientation: "portrait",
     margin: 5,
     gap: 2,
@@ -463,7 +484,15 @@ export default function Home() {
     selectedPlacementKeyRef.current = selectedPlacementKey;
   }, [photos, settings, selectedPlacementKey]);
 
-  const paper = A4[settings.orientation];
+  const basePaper = PAPER_SIZES[settings.paperSize];
+  const paper =
+    settings.orientation === "portrait"
+      ? basePaper
+      : {
+          ...basePaper,
+          width: basePaper.height,
+          height: basePaper.width,
+        };
   const layout = useMemo(
     () =>
       calculateLayout(photos, settings, paper.width, paper.height),
@@ -957,7 +986,7 @@ export default function Home() {
   async function exportPdf() {
     if (!layout.pages.length || layout.unplaced.length) return;
     setIsExporting(true);
-    setMessage("正在按 300 DPI 生成 A4 PDF，请稍候…");
+    setMessage(`正在按 300 DPI 生成 ${paper.label} PDF，请稍候…`);
 
     try {
       const [{ jsPDF }, imageEntries] = await Promise.all([
@@ -975,13 +1004,15 @@ export default function Home() {
       const pdf = new jsPDF({
         orientation,
         unit: "mm",
-        format: "a4",
+        format: [paper.width, paper.height],
         compress: true,
       });
       const scale = 300 / 25.4;
 
       for (let pageIndex = 0; pageIndex < layout.pages.length; pageIndex += 1) {
-        if (pageIndex > 0) pdf.addPage("a4", orientation);
+        if (pageIndex > 0) {
+          pdf.addPage([paper.width, paper.height], orientation);
+        }
 
         const canvas = document.createElement("canvas");
         canvas.width = Math.round(paper.width * scale);
@@ -1046,7 +1077,7 @@ export default function Home() {
       }
 
       const date = new Date();
-      const fileName = `月末照片排版-${date.getFullYear()}-${String(
+      const fileName = `月末照片排版-${paper.label}-${date.getFullYear()}-${String(
         date.getMonth() + 1,
       ).padStart(2, "0")}.pdf`;
       pdf.save(fileName);
@@ -1175,12 +1206,23 @@ export default function Home() {
               alt="月末拾光"
             />
             <h1 className="visually-hidden">月末拾光</h1>
-            <p>把值得纪念的照片，刚刚好地放进 A4 纸里。</p>
+            <p>把值得纪念的照片，刚刚好地放进纸张里。</p>
           </div>
         </div>
-        <div className="privacy-note">
-          <span aria-hidden="true">●</span>
-          照片仅在本机处理
+        <div className="topbar-actions">
+          <a
+            className="feedback-link"
+            href="https://github.com/dawwnforu/yuemo-photo-sheet/issues/new?template=feedback.yml"
+            target="_blank"
+            rel="noreferrer"
+          >
+            <span aria-hidden="true">?</span>
+            问题反馈
+          </a>
+          <div className="privacy-note">
+            <span aria-hidden="true">●</span>
+            照片仅在本机处理
+          </div>
         </div>
       </header>
 
@@ -1344,9 +1386,38 @@ export default function Home() {
             <div className="section-heading">
               <div>
                 <span className="eyebrow">02 · 纸张设置</span>
-                <h2>A4 排版规则</h2>
+                <h2>纸张排版规则</h2>
               </div>
             </div>
+
+            <label className="paper-size-field">
+              <span>
+                <strong>纸张规格</strong>
+                <small>预览、排版与 PDF 会同步切换</small>
+              </span>
+              <select
+                value={settings.paperSize}
+                onChange={(event) =>
+                  updateSetting(
+                    "paperSize",
+                    event.target.value as PaperSizeKey,
+                  )
+                }
+              >
+                {(
+                  Object.entries(PAPER_SIZES) as Array<
+                    [
+                      PaperSizeKey,
+                      (typeof PAPER_SIZES)[PaperSizeKey],
+                    ]
+                  >
+                ).map(([key, size]) => (
+                  <option key={key} value={key}>
+                    {size.label} · {size.width} × {size.height} mm
+                  </option>
+                ))}
+              </select>
+            </label>
 
             <div className="segmented-control" aria-label="纸张方向">
               <button
@@ -1431,7 +1502,7 @@ export default function Home() {
           <div className="preview-header">
             <div className="preview-heading">
               <span className="eyebrow">03 · 自动排版</span>
-              <h2>A4 打印预览</h2>
+              <h2>{paper.label} 打印预览</h2>
               <p className="preview-instruction">
                 点击照片，拖动四角控制点即可等比例缩放
               </p>
@@ -1460,7 +1531,7 @@ export default function Home() {
               </div>
               <div>
                 <strong>{layout.pages.length || "—"}</strong>
-                <span>A4 页</span>
+                <span>{paper.label} 页</span>
               </div>
               <div>
                 <strong>
@@ -1478,7 +1549,9 @@ export default function Home() {
                   className={`empty-paper ${settings.orientation}`}
                   aria-hidden="true"
                 >
-                  <span>210 × 297 mm</span>
+                  <span>
+                    {paper.width} × {paper.height} mm
+                  </span>
                   <i />
                   <i />
                   <i />
@@ -1487,8 +1560,8 @@ export default function Home() {
                 <div>
                   <strong>先导入几张照片吧</strong>
                   <p>
-                    设置尺寸后，照片会自动旋转、重排并尽量塞进更少的 A4
-                    纸。
+                    设置尺寸后，照片会自动旋转、重排并尽量塞进更少的{" "}
+                    {paper.label} 纸。
                   </p>
                 </div>
               </div>

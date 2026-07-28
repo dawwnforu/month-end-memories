@@ -15,12 +15,12 @@ export async function generateMetadata(): Promise<Metadata> {
 
   return {
     metadataBase: baseUrl,
-    title: "月末拾光｜A4 照片省纸排版",
+    title: "月末拾光｜照片省纸排版",
     description:
-      "导入照片、按毫米设置尺寸，自动旋转混排并一键导出 300 DPI A4 打印 PDF。",
+      "导入照片、按毫米设置尺寸，支持多种常用纸张，自动旋转混排并一键导出 300 DPI 打印 PDF。",
     openGraph: {
-      title: "月末拾光｜A4 照片省纸排版",
-      description: "照片排版 · A4省纸 · 一键PDF",
+      title: "月末拾光｜照片省纸排版",
+      description: "多种纸张 · 自动省纸 · 一键 PDF",
       type: "website",
       locale: "zh_CN",
       images: [
@@ -34,8 +34,8 @@ export async function generateMetadata(): Promise<Metadata> {
     },
     twitter: {
       card: "summary_large_image",
-      title: "月末拾光｜A4 照片省纸排版",
-      description: "照片排版 · A4省纸 · 一键PDF",
+      title: "月末拾光｜照片省纸排版",
+      description: "多种纸张 · 自动省纸 · 一键 PDF",
       images: [new URL("/og-v2.png", baseUrl).toString()],
     },
   };

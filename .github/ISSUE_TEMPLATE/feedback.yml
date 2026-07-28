@@ -1,0 +1,61 @@
+name: 问题反馈与功能建议
+description: 反馈排版、导出问题，或告诉我们你希望增加的功能
+title: "[反馈] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢你帮助改进「月末拾光」。请勿上传含有个人隐私的原始照片；如需截图，请先遮挡人物、地址和其他敏感信息。
+
+  - type: dropdown
+    id: category
+    attributes:
+      label: 反馈类型
+      options:
+        - 排版或旋转问题
+        - 尺寸或纸张问题
+        - PDF 导出或打印问题
+        - 功能建议
+        - 其他
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: 问题或建议
+      description: 请说明你遇到了什么，以及你希望得到怎样的结果。
+      placeholder: 请尽量具体地描述……
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 操作步骤
+      description: 如果是问题，请写出可以重复出现该问题的步骤。
+      placeholder: |
+        1. 导入……
+        2. 选择……
+        3. 点击……
+
+  - type: input
+    id: environment
+    attributes:
+      label: 设备与浏览器
+      description: 例如 Windows 11 / Chrome 版本 126。
+      placeholder: Windows、macOS、手机型号及浏览器版本
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: 补充信息
+      description: 可粘贴已遮挡隐私的截图；不要上传原始照片。
+
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: 隐私确认
+      options:
+        - label: 我确认未上传含有个人隐私的原始照片或未遮挡截图。
+          required: true
