@@ -25,7 +25,7 @@ export async function generateMetadata(): Promise<Metadata> {
       locale: "zh_CN",
       images: [
         {
-          url: new URL("/og.png", baseUrl).toString(),
+          url: new URL("/og-v2.png", baseUrl).toString(),
           width: 1200,
           height: 630,
           alt: "月末拾光 A4 照片排版工具",
@@ -36,7 +36,7 @@ export async function generateMetadata(): Promise<Metadata> {
       card: "summary_large_image",
       title: "月末拾光｜A4 照片省纸排版",
       description: "照片排版 · A4省纸 · 一键PDF",
-      images: [new URL("/og.png", baseUrl).toString()],
+      images: [new URL("/og-v2.png", baseUrl).toString()],
     },
   };
 }

@@ -3,6 +3,7 @@
 import {
   type ChangeEvent,
   type DragEvent,
+  type PointerEvent as ReactPointerEvent,
   useMemo,
   useRef,
   useState,
@@ -59,6 +60,8 @@ type PackResult = {
   pages: PackedPage[];
   unplaced: PackItem[];
 };
+
+type ResizeCorner = "nw" | "ne" | "sw" | "se";
 
 const A4 = {
   portrait: { width: 210, height: 297 },
@@ -398,6 +401,19 @@ export default function Home() {
   const [isDragging, setIsDragging] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [message, setMessage] = useState("");
+  const [selectedPlacementKey, setSelectedPlacementKey] = useState<
+    string | null
+  >(null);
+  const [resizeHint, setResizeHint] = useState<{
+    x: number;
+    y: number;
+    text: string;
+  } | null>(null);
+  const [resizeDraft, setResizeDraft] = useState<{
+    key: string;
+    scale: number;
+    corner: ResizeCorner;
+  } | null>(null);
   const objectUrls = useRef(new Set<string>());
 
   const paper = A4[settings.orientation];
@@ -571,6 +587,85 @@ export default function Home() {
     setSettings((current) => ({ ...current, [key]: value }));
   }
 
+  function beginDirectResize(
+    event: ReactPointerEvent<HTMLButtonElement>,
+    photo: Photo,
+    placement: Placement,
+    corner: ResizeCorner,
+  ) {
+    event.preventDefault();
+    event.stopPropagation();
+    const placedElement = event.currentTarget.closest(
+      ".placed-photo",
+    ) as HTMLElement | null;
+    if (!placedElement) return;
+
+    const bounds = placedElement.getBoundingClientRect();
+    const opposite = {
+      nw: { x: bounds.right, y: bounds.bottom },
+      ne: { x: bounds.left, y: bounds.bottom },
+      sw: { x: bounds.right, y: bounds.top },
+      se: { x: bounds.left, y: bounds.top },
+    }[corner];
+    const startDistance = Math.max(
+      1,
+      Math.hypot(event.clientX - opposite.x, event.clientY - opposite.y),
+    );
+    const startWidth = photo.widthMm;
+    const startHeight = photo.heightMm;
+    const minScale = Math.max(10 / startWidth, 10 / startHeight);
+    const maxScale = Math.min(400 / startWidth, 400 / startHeight);
+    let finalWidth = startWidth;
+    let finalHeight = startHeight;
+
+    const handlePointerMove = (moveEvent: PointerEvent) => {
+      const currentDistance = Math.hypot(
+        moveEvent.clientX - opposite.x,
+        moveEvent.clientY - opposite.y,
+      );
+      const scale = Math.max(
+        minScale,
+        Math.min(maxScale, currentDistance / startDistance),
+      );
+      const widthMm = roundMm(startWidth * scale);
+      const heightMm = roundMm(startHeight * scale);
+      finalWidth = widthMm;
+      finalHeight = heightMm;
+      setResizeDraft({ key: placement.key, scale, corner });
+      setResizeHint({
+        x: moveEvent.clientX + 14,
+        y: moveEvent.clientY + 14,
+        text: `${widthMm} × ${heightMm} mm`,
+      });
+    };
+
+    const handlePointerUp = () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+      window.removeEventListener("pointercancel", handlePointerUp);
+      setPhotos((current) =>
+        current.map((item) =>
+          item.id === photo.id
+            ? {
+                ...item,
+                widthMm: finalWidth,
+                heightMm: finalHeight,
+              }
+            : item,
+        ),
+      );
+      setResizeDraft(null);
+      setResizeHint(null);
+      setMessage(
+        `已直接缩放 ${photo.name}，并重新计算最省纸的排列。`,
+      );
+    };
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+    window.addEventListener("pointercancel", handlePointerUp);
+  }
+
   async function exportPdf() {
     if (!layout.pages.length || layout.unplaced.length) return;
     setIsExporting(true);
@@ -683,11 +778,14 @@ export default function Home() {
     <main className="app-shell">
       <header className="topbar">
         <div className="brand-lockup">
-          <span className="brand-mark" aria-hidden="true">
-            月
-          </span>
-          <div>
-            <h1>月末拾光</h1>
+          <div className="brand-identity">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              className="brand-logo"
+              src="/brand-logo.png"
+              alt="月末拾光"
+            />
+            <h1 className="visually-hidden">月末拾光</h1>
             <p>把值得纪念的照片，刚刚好地放进 A4 纸里。</p>
           </div>
         </div>
@@ -938,6 +1036,9 @@ export default function Home() {
             <div>
               <span className="eyebrow">03 · 自动排版</span>
               <h2>A4 打印预览</h2>
+              <p className="preview-instruction">
+                点击照片，拖动四角控制点即可等比例缩放
+              </p>
             </div>
             <div className="layout-stats">
               <div>
@@ -990,6 +1091,7 @@ export default function Home() {
                     </div>
                     <div
                       className="a4-page"
+                      onPointerDown={() => setSelectedPlacementKey(null)}
                       style={{
                         aspectRatio: `${paper.width} / ${paper.height}`,
                       }}
@@ -1016,10 +1118,43 @@ export default function Home() {
                           (item) => item.id === placement.photoId,
                         );
                         if (!photo) return null;
+                        const isSelected =
+                          selectedPlacementKey === placement.key;
+                        const activeResize =
+                          resizeDraft?.key === placement.key
+                            ? resizeDraft
+                            : null;
+                        const transformOrigin = activeResize
+                          ? {
+                              nw: "right bottom",
+                              ne: "left bottom",
+                              sw: "right top",
+                              se: "left top",
+                            }[activeResize.corner]
+                          : undefined;
                         return (
                           <div
-                            className="placed-photo"
+                            className={`placed-photo ${
+                              isSelected ? "is-selected" : ""
+                            }`}
                             key={placement.key}
+                            role="button"
+                            tabIndex={0}
+                            aria-label={`选择并缩放 ${photo.name}`}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setSelectedPlacementKey(placement.key);
+                            }}
+                            onKeyDown={(event) => {
+                              if (
+                                event.key === "Enter" ||
+                                event.key === " "
+                              ) {
+                                event.preventDefault();
+                                setSelectedPlacementKey(placement.key);
+                              }
+                            }}
+                            onPointerDown={(event) => event.stopPropagation()}
                             title={`${photo.name} · ${roundMm(
                               photo.widthMm,
                             )} × ${roundMm(photo.heightMm)} mm${
@@ -1042,6 +1177,10 @@ export default function Home() {
                               height: `${
                                 (placement.height / paper.height) * 100
                               }%`,
+                              transform: activeResize
+                                ? `scale(${activeResize.scale})`
+                                : undefined,
+                              transformOrigin,
                             }}
                           >
                             {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -1069,6 +1208,32 @@ export default function Home() {
                             {placement.rotated && (
                               <span className="rotation-badge">↻</span>
                             )}
+                            {isSelected && (
+                              <>
+                                <span className="direct-size-badge">
+                                  {roundMm(photo.widthMm)} ×{" "}
+                                  {roundMm(photo.heightMm)} mm
+                                </span>
+                                {(
+                                  ["nw", "ne", "sw", "se"] as ResizeCorner[]
+                                ).map((corner) => (
+                                  <button
+                                    type="button"
+                                    className={`resize-handle ${corner}`}
+                                    key={corner}
+                                    aria-label={`从${corner}角缩放 ${photo.name}`}
+                                    onPointerDown={(event) =>
+                                      beginDirectResize(
+                                        event,
+                                        photo,
+                                        placement,
+                                        corner,
+                                      )
+                                    }
+                                  />
+                                ))}
+                              </>
+                            )}
                           </div>
                         );
                       })}
@@ -1078,6 +1243,15 @@ export default function Home() {
               </div>
             )}
           </div>
+
+          {resizeHint && (
+            <div
+              className="floating-resize-hint"
+              style={{ left: resizeHint.x, top: resizeHint.y }}
+            >
+              {resizeHint.text}
+            </div>
+          )}
 
           {layout.unplaced.length > 0 && (
             <div className="warning-banner" role="alert">
