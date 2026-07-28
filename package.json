@@ -1,7 +1,22 @@
 {
-  "name": "monthly-photo-sheet",
-  "version": "0.1.0",
+  "name": "yuemo-photo-sheet",
+  "version": "1.0.1",
+  "description": "月末拾光：自动旋转、实时重排并导出 300 DPI A4 PDF 的照片省纸排版工具。",
   "private": true,
+  "homepage": "https://yuemo-photo-sheet.dawwnforu.chatgpt.site",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dawwnforu/yuemo-photo-sheet.git"
+  },
+  "keywords": [
+    "photo-layout",
+    "a4",
+    "pdf",
+    "printing",
+    "scrapbook",
+    "手帐",
+    "照片排版"
+  ],
   "engines": {
     "node": ">=22.13.0"
   },

@@ -1,98 +1,194 @@
-# vinext-starter
+# 月末拾光
 
-A clean full-stack starter running on
-[vinext](https://github.com/cloudflare/vinext), with optional Cloudflare D1 and
-Drizzle support.
+一款面向手帐、照片墙和纸质纪念册制作的 A4 照片智能排版工具。导入照片、按毫米设置成品尺寸，系统会自动旋转并优化照片组合，尽可能减少 A4 纸留白，最后一键导出适合打印的高分辨率 PDF。
 
-## Prerequisites
+**当前版本：`release1.0.1`**
 
-- Node.js `>=22.13.0`
+**在线使用：<https://yuemo-photo-sheet.dawwnforu.chatgpt.site>**
 
-## Quick Start
+![月末拾光预览](public/og-v2.png)
+
+## 项目简介
+
+月末拾光解决的是一个很具体的日常问题：每个月挑选值得纪念的照片，把它们彩印在 A4 纸上，剪下来贴进手帐。
+
+传统做法需要在 Word 中逐张插入、缩放和移动图片。这个项目把过程简化为：
+
+1. 一次导入多张照片；
+2. 输入每张照片希望打印的宽度、高度和份数；
+3. 自动计算更省纸的 A4 排列方式；
+4. 需要时手动旋转或拖动四角微调尺寸；
+5. 一键导出 300 DPI A4 PDF，直接送到打印店彩印。
+
+## 主要功能
+
+- 支持 JPG、PNG、WebP，可一次选择或拖入多张照片；
+- 按毫米设置每张照片的打印宽度和高度；
+- 锁定原始宽高比，修改一边时自动计算另一边；
+- 支持同一张照片打印 1–20 份；
+- 提供 50、60、70、90 mm 常用长边预设；
+- 支持 A4 纵向和横向纸张；
+- 可设置页边距与照片间空隙；
+- 自动允许照片旋转 90°，提高纸张利用率；
+- 每张照片可手动顺时针旋转，每次旋转 90°；
+- 点击照片后显示蓝色选中边框和四角缩放点；
+- 拖动缩放时实时重新排列其他照片，并同步更新页数；
+- 实时显示照片数量、A4 页数和面积利用率；
+- 自动识别无法放入当前 A4 可用区域的照片；
+- 导出 300 DPI、多页 A4 PDF；
+- 所有照片处理与 PDF 生成均在当前浏览器中完成。
+
+## 隐私说明
+
+导入的照片通过浏览器本地对象地址读取，排版与 PDF 生成在设备本地完成。项目本身不会把照片保存到数据库，也不要求注册账户。
+
+关闭或刷新页面后，本次导入的照片和排版状态会被清除。使用公共电脑时，仍建议在完成打印后关闭页面，并删除下载目录中的 PDF。
+
+## 普通用户电脑要求
+
+在线使用不需要安装 Node.js、Git 或其他开发工具。
+
+| 项目 | 最低要求 | 推荐配置 |
+| --- | --- | --- |
+| 操作系统 | Windows 10、macOS 12 或常见 Linux 桌面系统 | 仍在安全支持期内的系统版本 |
+| 浏览器 | 支持 File API、Canvas、Blob 和 ES Modules 的现代浏览器 | 最新稳定版 Chrome、Edge、Firefox 或 Safari |
+| 内存 | 4 GB | 8 GB 或以上；大量高像素照片建议 16 GB |
+| 屏幕 | 1280 × 720 | 1920 × 1080 或以上 |
+| 网络 | 首次打开网页需要网络 | 稳定宽带或 Wi-Fi |
+| 打印 | 可打开 PDF 的 A4 打印环境 | 彩色打印机或打印店，选择 100% 实际大小 |
+
+手机和平板可以打开网页，但照片精细缩放、批量排版和 PDF 打印更适合在电脑上完成。
+
+## 使用方法
+
+1. 打开[在线版本](https://yuemo-photo-sheet.dawwnforu.chatgpt.site)。
+2. 点击“选择或拖入照片”，导入本月照片。
+3. 在左侧为每张照片设置宽、高和份数。
+4. 在右侧 A4 预览中点击照片：
+   - 点击右上角旋转按钮可顺时针旋转 90°；
+   - 拖动四角蓝色圆点可自由缩放；
+   - 缩放过程中其他照片会实时重新排列。
+5. 确认 A4 页数与纸张利用率。
+6. 点击“导出打印 PDF”。
+7. 打印时选择 **A4、实际大小或 100%**，不要选择“适合页面”或自动缩放。
+
+## 本地开发环境
+
+### 必需环境
+
+| 工具 | 要求 |
+| --- | --- |
+| Node.js | `>= 22.13.0` |
+| npm | 建议 `>= 10` |
+| Git | 建议使用当前稳定版 |
+| 磁盘空间 | 至少 2 GB 可用空间 |
+| 内存 | 8 GB 或以上 |
+
+### 安装与启动
 
 ```bash
+git clone https://github.com/dawwnforu/yuemo-photo-sheet.git
+cd yuemo-photo-sheet
 npm install
 npm run dev
+```
+
+开发服务器启动后，打开终端显示的本地地址。
+
+### 生产构建
+
+```bash
 npm run build
+npm run start
 ```
 
-This starter does not use `wrangler.jsonc`.
+### 代码检查
 
-## Included Shape
-
-- edit site code under `app/`
-- `.openai/hosting.json` declares optional Sites D1 and R2 bindings
-- `vite.config.ts` simulates declared bindings for local development
-- `db/schema.ts` starts intentionally empty
-- `examples/d1/` contains an optional D1 example surface
-- `drizzle.config.ts` supports local migration generation when needed
-
-## Workspace Auth Headers
-
-OpenAI workspace sites can read the current user's email from
-`oai-authenticated-user-email`.
-
-SIWC-authenticated workspace sites may also receive
-`oai-authenticated-user-full-name` when the user's SIWC profile has a non-empty
-`name` claim. The full-name value is percent-encoded UTF-8 and is accompanied by
-`oai-authenticated-user-full-name-encoding: percent-encoded-utf-8`.
-
-Treat the full name as optional and fall back to email when it is absent:
-
-```tsx
-import { headers } from "next/headers";
-
-export default async function Home() {
-  const requestHeaders = await headers();
-  const email = requestHeaders.get("oai-authenticated-user-email");
-  const encodedFullName = requestHeaders.get("oai-authenticated-user-full-name");
-  const fullName =
-    encodedFullName &&
-    requestHeaders.get("oai-authenticated-user-full-name-encoding") ===
-      "percent-encoded-utf-8"
-      ? decodeURIComponent(encodedFullName)
-      : null;
-
-  const displayName = fullName ?? email;
-  // ...
-}
+```bash
+npm run lint
+npm test
 ```
 
-## Optional Dispatch-Owned ChatGPT Sign-In
+## 环境配置
 
-Import the ready-to-use helpers from `app/chatgpt-auth.ts` when the site needs
-optional or required ChatGPT sign-in:
+当前版本不需要 API Key、数据库连接或第三方图片存储，因此本地运行时无需创建 `.env` 文件。
 
-- Use `getChatGPTUser()` for optional signed-in UI.
-- Use `requireChatGPTUser(returnTo)` for server-rendered pages that should send
-  anonymous visitors through Sign in with ChatGPT.
-- Use `chatGPTSignInPath(returnTo)` and `chatGPTSignOutPath(returnTo)` for
-  browser links or actions.
-- Pass a same-origin relative `returnTo` path for the destination after sign-in
-  or sign-out. The helper validates and safely encodes it.
-- Mark protected pages with `export const dynamic = "force-dynamic"` because
-  they depend on per-request identity headers.
+| 配置项 | 是否必需 | 说明 |
+| --- | --- | --- |
+| 环境变量 | 否 | 当前版本没有必需的运行时密钥 |
+| 数据库 | 否 | 不保存用户照片或排版记录 |
+| 对象存储 | 否 | 图片在浏览器本地处理 |
+| 登录系统 | 否 | 公开网页可直接使用 |
+| PDF 服务 | 否 | 使用浏览器端 jsPDF 生成 |
 
-Dispatch owns `/signin-with-chatgpt`, `/signout-with-chatgpt`, `/callback`, the
-OAuth cookies, and identity header injection. Do not implement app routes for
-those reserved paths. Routes that do not import and call the helper remain
-anonymous-compatible.
+仓库中的 `.openai/hosting.json` 用于现有 Sites 部署。它不包含照片、账号密码或 API 密钥。部署到其他平台时，可以根据目标平台调整构建入口和静态资源配置。
 
-SIWC establishes identity only; it does not prove workspace membership. Use the
-Sites hosting platform's access policy controls for workspace-wide restrictions,
-or enforce explicit server-side membership or allowlist checks.
+## 常用命令
 
-Use SIWC for account pages, user-specific dashboards, saved records, and write
-actions tied to the current ChatGPT user. Leave public content anonymous.
+| 命令 | 用途 |
+| --- | --- |
+| `npm run dev` | 启动本地开发环境 |
+| `npm run build` | 生成生产版本并验证构建 |
+| `npm run start` | 启动生产构建 |
+| `npm run lint` | 检查代码规范 |
+| `npm test` | 执行项目测试 |
 
-## Useful Commands
+## 技术栈
 
-- `npm run dev`: start local development
-- `npm run build`: verify the vinext build output
-- `npm test`: build the starter and verify its rendered loading skeleton
-- `npm run db:generate`: generate Drizzle migrations after schema changes
+- React 19
+- Next.js 16
+- vinext
+- TypeScript
+- Vite 8
+- jsPDF
+- Cloudflare Workers / Sites
 
-## Learn More
+## 项目结构
 
-- [vinext Documentation](https://github.com/cloudflare/vinext)
-- [Drizzle D1 Guide](https://orm.drizzle.team/docs/get-started/d1-new)
+```text
+app/
+  globals.css        页面样式
+  layout.tsx         页面信息与分享卡片配置
+  page.tsx           照片导入、排版、交互与 PDF 导出
+public/
+  brand-logo-v3.png  当前品牌 Logo
+  og-v2.png          GitHub 与社交分享预览图
+tests/
+  rendered-html.test.mjs
+.openai/
+  hosting.json       Sites 项目标识
+```
+
+## 已知说明
+
+- 超高像素照片会占用较多浏览器内存，建议分批处理；
+- 照片尺寸、页边距和间隙都以毫米计算；
+- 面积利用率用于辅助判断，不代表所有剩余空白都能容纳下一张照片；
+- 打印店必须关闭“适合页面”，否则实际成品尺寸会发生变化；
+- 浏览器刷新后不会保留当前照片与排版状态。
+
+## 版本记录
+
+详细记录见 [CHANGELOG.md](CHANGELOG.md)。
+
+### release1.0.1
+
+- 完成 A4 照片自动混排和多页 PDF 导出；
+- 支持自动旋转与单张照片手动旋转；
+- 支持四角拖动缩放与实时重排；
+- 增加蓝色选中高亮，明确当前编辑目标；
+- 完成“月末拾光”品牌 Logo 与公开在线版本。
+
+## 反馈
+
+如遇到排版、旋转、尺寸或 PDF 导出问题，请在 GitHub 仓库提交 Issue，并附上：
+
+- 操作系统与浏览器版本；
+- 导入照片数量；
+- 目标宽高、边距和间隙设置；
+- 实际结果与预期结果；
+- 可公开的截图；请勿上传含有隐私内容的原始照片。
+
+## 许可证
+
+当前仓库未附带开源许可证。除非仓库所有者另行授权，源代码版权归仓库所有者所有；公开网页可按其提供的功能正常使用。
