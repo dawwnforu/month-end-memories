@@ -4,6 +4,7 @@ import {
   type ChangeEvent,
   type DragEvent,
   type PointerEvent as ReactPointerEvent,
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -13,6 +14,7 @@ type Photo = {
   id: string;
   name: string;
   src: string;
+  fingerprint: string;
   ratio: number;
   rotationTurns: number;
   manualRotation: boolean;
@@ -28,6 +30,12 @@ type Settings = {
   margin: number;
   gap: number;
   allowRotation: boolean;
+};
+
+type UndoSnapshot = {
+  photos: Photo[];
+  settings: Settings;
+  selectedPlacementKey: string | null;
 };
 
 type PackItem = {
@@ -396,6 +404,23 @@ function loadBrowserImage(src: string) {
   });
 }
 
+async function fingerprintFile(file: File) {
+  const buffer = await file.arrayBuffer();
+  const digest = await crypto.subtle.digest("SHA-256", buffer);
+  return Array.from(new Uint8Array(digest), (byte) =>
+    byte.toString(16).padStart(2, "0"),
+  ).join("");
+}
+
+function isEditableTarget(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) return false;
+  return (
+    target.matches("input, textarea, select") ||
+    target.isContentEditable ||
+    Boolean(target.closest("[contenteditable='true']"))
+  );
+}
+
 export default function Home() {
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [settings, setSettings] = useState<Settings>({
@@ -407,6 +432,11 @@ export default function Home() {
   const [isDragging, setIsDragging] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [message, setMessage] = useState("");
+  const [duplicateNotice, setDuplicateNotice] = useState<{
+    count: number;
+  } | null>(null);
+  const [showShortcutHelp, setShowShortcutHelp] = useState(false);
+  const [undoDepth, setUndoDepth] = useState(0);
   const [selectedPlacementKey, setSelectedPlacementKey] = useState<
     string | null
   >(null);
@@ -420,6 +450,15 @@ export default function Home() {
     corner: ResizeCorner;
   } | null>(null);
   const objectUrls = useRef(new Set<string>());
+  const knownFingerprints = useRef(new Map<string, number>());
+  const isImporting = useRef(false);
+  const undoHistory = useRef<UndoSnapshot[]>([]);
+  const photosRef = useRef(photos);
+  const settingsRef = useRef(settings);
+  const selectedPlacementKeyRef = useRef(selectedPlacementKey);
+  photosRef.current = photos;
+  settingsRef.current = settings;
+  selectedPlacementKeyRef.current = selectedPlacementKey;
 
   const paper = A4[settings.orientation];
   const layout = useMemo(
@@ -445,6 +484,79 @@ export default function Home() {
       ? Math.min(100, (usedArea / (usableArea * layout.pages.length)) * 100)
       : 0;
 
+  function rebuildKnownFingerprints(nextPhotos: Photo[]) {
+    const nextFingerprints = new Map<string, number>();
+    nextPhotos.forEach((photo) => {
+      nextFingerprints.set(
+        photo.fingerprint,
+        (nextFingerprints.get(photo.fingerprint) ?? 0) + 1,
+      );
+      objectUrls.current.add(photo.src);
+    });
+    knownFingerprints.current = nextFingerprints;
+  }
+
+  function rememberForUndo() {
+    undoHistory.current.push({
+      photos: photosRef.current.map((photo) => ({ ...photo })),
+      settings: { ...settingsRef.current },
+      selectedPlacementKey: selectedPlacementKeyRef.current,
+    });
+    if (undoHistory.current.length > 50) {
+      undoHistory.current.shift();
+    }
+    setUndoDepth(undoHistory.current.length);
+  }
+
+  function undoLastAction() {
+    const snapshot = undoHistory.current.pop();
+    if (!snapshot) {
+      setMessage("目前没有可撤销的操作。");
+      return;
+    }
+    rebuildKnownFingerprints(snapshot.photos);
+    setPhotos(snapshot.photos);
+    setSettings(snapshot.settings);
+    setSelectedPlacementKey(snapshot.selectedPlacementKey);
+    setResizeDraft(null);
+    setResizeHint(null);
+    setUndoDepth(undoHistory.current.length);
+    setMessage("已撤销上一步操作。");
+  }
+
+  function getSelectedPhoto() {
+    const key = selectedPlacementKeyRef.current;
+    if (!key) return null;
+    return (
+      photosRef.current.find((photo) => key.startsWith(`${photo.id}-`)) ?? null
+    );
+  }
+
+  function resizePhotoByKeyboard(photoId: string, direction: 1 | -1) {
+    const target = photosRef.current.find((photo) => photo.id === photoId);
+    if (!target) return;
+    const currentLongEdge = Math.max(target.widthMm, target.heightMm);
+    const nextLongEdge = Math.max(10, Math.min(400, currentLongEdge + direction));
+    if (Math.abs(nextLongEdge - currentLongEdge) < EPSILON) return;
+
+    rememberForUndo();
+    const scale = nextLongEdge / currentLongEdge;
+    setPhotos((current) =>
+      current.map((photo) =>
+        photo.id === photoId
+          ? {
+              ...photo,
+              widthMm: roundMm(photo.widthMm * scale),
+              heightMm: roundMm(photo.heightMm * scale),
+            }
+          : photo,
+      ),
+    );
+    setMessage(
+      `${target.name} 已${direction > 0 ? "放大" : "缩小"} 1 mm，版面已重新排列。`,
+    );
+  }
+
   async function addFiles(fileList: FileList | File[]) {
     const files = Array.from(fileList).filter((file) =>
       file.type.startsWith("image/"),
@@ -454,9 +566,55 @@ export default function Home() {
       return;
     }
 
-    const loaded = await Promise.all(
-      files.map(
-        (file) =>
+    if (isImporting.current) {
+      setMessage("正在检查上一批照片，请稍候再试。");
+      return;
+    }
+
+    isImporting.current = true;
+    setMessage("正在检查照片是否重复…");
+
+    try {
+      const fingerprintedFiles = await Promise.all(
+        files.map(async (file) => ({
+          file,
+          fingerprint: await fingerprintFile(file),
+        })),
+      );
+      const incomingCounts = fingerprintedFiles.reduce(
+        (counts, { fingerprint }) => {
+          counts.set(fingerprint, (counts.get(fingerprint) ?? 0) + 1);
+          return counts;
+        },
+        new Map<string, number>(),
+      );
+      const acceptedFingerprints = new Set<string>();
+      const duplicateGroupTotals: number[] = [];
+      const uniqueFiles = fingerprintedFiles.filter(({ fingerprint }) => {
+        const existingCount = knownFingerprints.current.get(fingerprint) ?? 0;
+        const isDuplicate =
+          existingCount > 0 || acceptedFingerprints.has(fingerprint);
+
+        if (isDuplicate) {
+          duplicateGroupTotals.push(
+            existingCount + (incomingCounts.get(fingerprint) ?? 0),
+          );
+          return false;
+        }
+
+        acceptedFingerprints.add(fingerprint);
+        return true;
+      });
+
+      if (duplicateGroupTotals.length > 0) {
+        setDuplicateNotice({
+          count: Math.max(...duplicateGroupTotals),
+        });
+      }
+
+      const loaded = await Promise.all(
+        uniqueFiles.map(
+          ({ file, fingerprint }) =>
           new Promise<Photo | null>((resolve) => {
             const src = URL.createObjectURL(file);
             const image = new Image();
@@ -470,6 +628,7 @@ export default function Home() {
                 id: crypto.randomUUID(),
                 name: file.name,
                 src,
+                fingerprint,
                 ratio,
                 rotationTurns: 0,
                 manualRotation: false,
@@ -486,20 +645,40 @@ export default function Home() {
             };
             image.src = src;
           }),
-      ),
-    );
+        ),
+      );
 
-    const validPhotos = loaded.filter(
-      (photo): photo is Photo => photo !== null,
-    );
-    setPhotos((current) => [...current, ...validPhotos]);
-    setMessage(
-      validPhotos.length === files.length
-        ? `已加入 ${validPhotos.length} 张照片，正在重新计算最省纸排法。`
-        : `已加入 ${validPhotos.length} 张，另有 ${
-            files.length - validPhotos.length
-          } 张无法读取。`,
-    );
+      const validPhotos = loaded.filter(
+        (photo): photo is Photo => photo !== null,
+      );
+      validPhotos.forEach((photo) => {
+        knownFingerprints.current.set(
+          photo.fingerprint,
+          (knownFingerprints.current.get(photo.fingerprint) ?? 0) + 1,
+        );
+      });
+      setPhotos((current) => [...current, ...validPhotos]);
+
+      const duplicateCount = files.length - uniqueFiles.length;
+      const unreadableCount = uniqueFiles.length - validPhotos.length;
+      if (validPhotos.length === 0 && duplicateCount > 0 && unreadableCount === 0) {
+        setMessage(`已跳过 ${duplicateCount} 张重复照片。`);
+      } else if (duplicateCount > 0 || unreadableCount > 0) {
+        setMessage(
+          `已加入 ${validPhotos.length} 张，跳过 ${duplicateCount} 张重复照片${
+            unreadableCount > 0 ? `，另有 ${unreadableCount} 张无法读取` : ""
+          }。`,
+        );
+      } else {
+        setMessage(
+          `已加入 ${validPhotos.length} 张照片，正在重新计算最省纸排法。`,
+        );
+      }
+    } catch {
+      setMessage("图片重复检查失败，请重新选择。");
+    } finally {
+      isImporting.current = false;
+    }
   }
 
   function handleFileInput(event: ChangeEvent<HTMLInputElement>) {
@@ -563,6 +742,7 @@ export default function Home() {
       if (target) {
         URL.revokeObjectURL(target.src);
         objectUrls.current.delete(target.src);
+        knownFingerprints.current.delete(target.fingerprint);
       }
       return current.filter((photo) => photo.id !== photoId);
     });
@@ -571,6 +751,7 @@ export default function Home() {
   function clearPhotos() {
     objectUrls.current.forEach((url) => URL.revokeObjectURL(url));
     objectUrls.current.clear();
+    knownFingerprints.current.clear();
     setPhotos([]);
     setSelectedPlacementKey(null);
     setMessage("");
@@ -806,6 +987,37 @@ export default function Home() {
 
   return (
     <main className="app-shell">
+      {duplicateNotice && (
+        <div
+          className="duplicate-modal-layer"
+          role="presentation"
+          onMouseDown={() => setDuplicateNotice(null)}
+        >
+          <section
+            className="duplicate-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="duplicate-modal-title"
+            aria-describedby="duplicate-modal-description"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <span className="duplicate-modal-mark" aria-hidden="true">
+              !
+            </span>
+            <h2 id="duplicate-modal-title">检测到客官上传了重复图片</h2>
+            <p id="duplicate-modal-description">
+              此图片已存在（共{duplicateNotice.count}张）
+            </p>
+            <button
+              type="button"
+              onClick={() => setDuplicateNotice(null)}
+              autoFocus
+            >
+              知道了
+            </button>
+          </section>
+        </div>
+      )}
       <header className="topbar">
         <div className="brand-lockup">
           <div className="brand-identity">
