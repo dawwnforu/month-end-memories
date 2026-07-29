@@ -565,6 +565,7 @@ export default function Home() {
   });
   const [isDragging, setIsDragging] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const [allowDuplicateImages, setAllowDuplicateImages] = useState(false);
   const [message, setMessage] = useState("");
   const [duplicateNotice, setDuplicateNotice] = useState<{
     count: number;
@@ -729,7 +730,9 @@ export default function Home() {
     }
 
     isImporting.current = true;
-    setMessage("正在检查照片是否重复…");
+    setMessage(
+      allowDuplicateImages ? "正在读取照片…" : "正在检查照片是否重复…",
+    );
 
     try {
       const fingerprintedFiles = await Promise.all(
@@ -738,39 +741,46 @@ export default function Home() {
           fingerprint: await fingerprintFile(file),
         })),
       );
-      const incomingCounts = fingerprintedFiles.reduce(
-        (counts, { fingerprint }) => {
-          counts.set(fingerprint, (counts.get(fingerprint) ?? 0) + 1);
-          return counts;
-        },
-        new Map<string, number>(),
-      );
-      const acceptedFingerprints = new Set<string>();
-      const duplicateGroupTotals: number[] = [];
-      const uniqueFiles = fingerprintedFiles.filter(({ fingerprint }) => {
-        const existingCount = knownFingerprints.current.get(fingerprint) ?? 0;
-        const isDuplicate =
-          existingCount > 0 || acceptedFingerprints.has(fingerprint);
+      let importFiles = fingerprintedFiles;
+      let duplicateCount = 0;
 
-        if (isDuplicate) {
-          duplicateGroupTotals.push(
-            existingCount + (incomingCounts.get(fingerprint) ?? 0),
-          );
-          return false;
-        }
+      if (!allowDuplicateImages) {
+        const incomingCounts = fingerprintedFiles.reduce(
+          (counts, { fingerprint }) => {
+            counts.set(fingerprint, (counts.get(fingerprint) ?? 0) + 1);
+            return counts;
+          },
+          new Map<string, number>(),
+        );
+        const acceptedFingerprints = new Set<string>();
+        const duplicateGroupTotals: number[] = [];
+        importFiles = fingerprintedFiles.filter(({ fingerprint }) => {
+          const existingCount =
+            knownFingerprints.current.get(fingerprint) ?? 0;
+          const isDuplicate =
+            existingCount > 0 || acceptedFingerprints.has(fingerprint);
 
-        acceptedFingerprints.add(fingerprint);
-        return true;
-      });
+          if (isDuplicate) {
+            duplicateGroupTotals.push(
+              existingCount + (incomingCounts.get(fingerprint) ?? 0),
+            );
+            return false;
+          }
 
-      if (duplicateGroupTotals.length > 0) {
-        setDuplicateNotice({
-          count: Math.max(...duplicateGroupTotals),
+          acceptedFingerprints.add(fingerprint);
+          return true;
         });
+
+        duplicateCount = fingerprintedFiles.length - importFiles.length;
+        if (duplicateGroupTotals.length > 0) {
+          setDuplicateNotice({
+            count: Math.max(...duplicateGroupTotals),
+          });
+        }
       }
 
       const loaded = await Promise.all(
-        uniqueFiles.map(
+        importFiles.map(
           ({ file, fingerprint }) =>
           new Promise<Photo | null>((resolve) => {
             const src = URL.createObjectURL(file);
@@ -821,8 +831,7 @@ export default function Home() {
       });
       setPhotos((current) => [...current, ...validPhotos]);
 
-      const duplicateCount = files.length - uniqueFiles.length;
-      const unreadableCount = uniqueFiles.length - validPhotos.length;
+      const unreadableCount = importFiles.length - validPhotos.length;
       if (validPhotos.length === 0 && duplicateCount > 0 && unreadableCount === 0) {
         setMessage(`已跳过 ${duplicateCount} 张重复照片。`);
       } else if (duplicateCount > 0 || unreadableCount > 0) {
@@ -837,7 +846,7 @@ export default function Home() {
         );
       }
     } catch {
-      setMessage("图片重复检查失败，请重新选择。");
+      setMessage("图片读取失败，请重新选择。");
     } finally {
       isImporting.current = false;
     }
@@ -1812,6 +1821,33 @@ export default function Home() {
               </span>
               <strong>选择或拖入照片</strong>
               <small>支持 JPG、PNG、WebP，可一次多选</small>
+            </label>
+
+            <label className="switch-row duplicate-policy-row">
+              <span>
+                <strong>是否允许图片重复</strong>
+                <small>
+                  {allowDuplicateImages
+                    ? "是：相同图片会分别加入，不显示重复提醒"
+                    : "否：不允许重复图片，并保留重复数量提醒"}
+                </small>
+              </span>
+              <input
+                type="checkbox"
+                checked={allowDuplicateImages}
+                aria-label="是否允许图片重复"
+                onChange={(event) => {
+                  const allowed = event.target.checked;
+                  setAllowDuplicateImages(allowed);
+                  if (allowed) setDuplicateNotice(null);
+                  setMessage(
+                    allowed
+                      ? "已允许重复图片，再次导入相同照片时不会提醒。"
+                      : "已禁止重复图片，导入时会检测并提醒重复项。",
+                  );
+                }}
+              />
+              <span className="switch" aria-hidden="true" />
             </label>
 
             {photos.length > 0 && (

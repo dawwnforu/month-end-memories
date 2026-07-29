@@ -97,3 +97,19 @@ test("offers real-world paper size references", async () => {
   assert.match(css, /\.size-reference-entry/);
   assert.match(readme, /纸张真实大小参考/);
 });
+
+test("lets users opt in to importing duplicate images", async () => {
+  const [page, css, readme] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+    readFile(new URL("../README.md", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(page, /allowDuplicateImages/);
+  assert.match(page, /if \(!allowDuplicateImages\)/);
+  assert.match(page, /是否允许图片重复/);
+  assert.match(page, /相同图片会分别加入，不显示重复提醒/);
+  assert.match(page, /不允许重复图片，并保留重复数量提醒/);
+  assert.match(css, /\.duplicate-policy-row/);
+  assert.match(readme, /允许图片重复/);
+});

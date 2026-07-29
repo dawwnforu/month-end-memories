@@ -1017,6 +1017,19 @@ kbd {
   margin-top: 5px;
 }
 
+.duplicate-policy-row {
+  background: #f6f4ef;
+  border: 1px solid #e2ded6;
+  border-radius: 10px;
+  gap: 14px;
+  margin-top: 10px;
+  padding: 10px 11px;
+}
+
+.duplicate-policy-row small {
+  line-height: 1.45;
+}
+
 .batch-size {
   align-items: center;
   display: flex;
