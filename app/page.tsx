@@ -94,6 +94,15 @@ type PackResult = {
 
 type ResizeCorner = "nw" | "ne" | "sw" | "se";
 type CropDragMode = ResizeCorner | "move";
+type SizeReferenceKey =
+  | "pen"
+  | "card"
+  | "phone"
+  | "mouse"
+  | "charger"
+  | "textbook"
+  | "sponge"
+  | "tissues";
 
 const PAPER_SIZES: Record<
   PaperSizeKey,
@@ -112,8 +121,87 @@ const PAPER_SIZES: Record<
 const LONG_EDGE_PRESETS = [50, 60, 70, 90];
 const EPSILON = 0.001;
 
+const SIZE_REFERENCES: Array<{
+  key: SizeReferenceKey;
+  label: string;
+  width: number;
+  height: number;
+  shape: SizeReferenceKey;
+  note: string;
+}> = [
+  {
+    key: "pen",
+    label: "常见中性笔",
+    width: 145,
+    height: 10,
+    shape: "pen",
+    note: "常见近似尺寸",
+  },
+  {
+    key: "card",
+    label: "银行卡",
+    width: 85.6,
+    height: 53.98,
+    shape: "card",
+    note: "ISO ID-1 标准",
+  },
+  {
+    key: "phone",
+    label: "iPhone 15",
+    width: 71.6,
+    height: 147.6,
+    shape: "phone",
+    note: "Apple 官方尺寸",
+  },
+  {
+    key: "mouse",
+    label: "罗技 M240 鼠标",
+    width: 60,
+    height: 99,
+    shape: "mouse",
+    note: "罗技官方尺寸",
+  },
+  {
+    key: "charger",
+    label: "Anker 523 充电器",
+    width: 35,
+    height: 52.5,
+    shape: "charger",
+    note: "Anker 官方尺寸",
+  },
+  {
+    key: "textbook",
+    label: "学生课本",
+    width: 185,
+    height: 260,
+    shape: "textbook",
+    note: "常见 16 开近似尺寸",
+  },
+  {
+    key: "sponge",
+    label: "洗碗海绵",
+    width: 110,
+    height: 70,
+    shape: "sponge",
+    note: "家用常见近似尺寸",
+  },
+  {
+    key: "tissues",
+    label: "便携纸巾包",
+    width: 110,
+    height: 55,
+    shape: "tissues",
+    note: "常见近似尺寸",
+  },
+];
+
 function roundMm(value: number) {
   return Math.round(value * 10) / 10;
+}
+
+function formatReferenceCount(value: number) {
+  const rounded = value >= 10 ? Math.round(value) : Math.round(value * 10) / 10;
+  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
 }
 
 function cropBackgroundStyle(photo: Photo) {
@@ -485,6 +573,11 @@ export default function Home() {
     photoId: string;
     draft: CropArea;
   } | null>(null);
+  const [showSizeReference, setShowSizeReference] = useState(false);
+  const [referencePaperKey, setReferencePaperKey] =
+    useState<PaperSizeKey>("a4");
+  const [referenceObjectKey, setReferenceObjectKey] =
+    useState<SizeReferenceKey>("pen");
   const [undoDepth, setUndoDepth] = useState(0);
   const [selectedPlacementKey, setSelectedPlacementKey] = useState<
     string | null
@@ -1147,6 +1240,14 @@ export default function Home() {
         return;
       }
 
+      if (showSizeReference) {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          setShowSizeReference(false);
+        }
+        return;
+      }
+
       if (
         (event.ctrlKey || event.metaKey) &&
         !event.altKey &&
@@ -1330,6 +1431,21 @@ export default function Home() {
   const cropPhoto = cropEditor
     ? photos.find((photo) => photo.id === cropEditor.photoId) ?? null
     : null;
+  const referencePaper = PAPER_SIZES[referencePaperKey];
+  const referenceObject =
+    SIZE_REFERENCES.find((item) => item.key === referenceObjectKey) ??
+    SIZE_REFERENCES[0];
+  const referenceGapMm = 24;
+  const referenceStageWidth =
+    referencePaper.width + referenceObject.width + referenceGapMm;
+  const referenceStageHeight = Math.max(
+    referencePaper.height,
+    referenceObject.height,
+  );
+  const referenceObjectLongEdge = Math.max(
+    referenceObject.width,
+    referenceObject.height,
+  );
 
   return (
     <main className="app-shell">
@@ -1454,6 +1570,178 @@ export default function Home() {
               >
                 应用裁剪
               </button>
+            </div>
+          </section>
+        </div>
+      )}
+      {showSizeReference && (
+        <div
+          className="size-reference-layer"
+          role="presentation"
+          onMouseDown={() => setShowSizeReference(false)}
+        >
+          <section
+            className="size-reference-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="size-reference-title"
+            aria-describedby="size-reference-description"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="size-reference-heading">
+              <div>
+                <span className="eyebrow">真实比例参考</span>
+                <h2 id="size-reference-title">纸张到底有多大？</h2>
+                <p id="size-reference-description">
+                  选择纸张和身边物品，图形会按照同一比例展示。
+                </p>
+              </div>
+              <button
+                type="button"
+                aria-label="关闭纸张大小参考"
+                onClick={() => setShowSizeReference(false)}
+                autoFocus
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="reference-paper-tabs" aria-label="选择纸张规格">
+              {(
+                Object.entries(PAPER_SIZES) as Array<
+                  [PaperSizeKey, (typeof PAPER_SIZES)[PaperSizeKey]]
+                >
+              ).map(([key, size]) => (
+                <button
+                  type="button"
+                  className={referencePaperKey === key ? "is-active" : ""}
+                  aria-pressed={referencePaperKey === key}
+                  key={key}
+                  onClick={() => setReferencePaperKey(key)}
+                >
+                  <strong>{size.label}</strong>
+                  <small>
+                    {size.width} × {size.height} mm
+                  </small>
+                </button>
+              ))}
+            </div>
+
+            <div className="reference-object-tabs" aria-label="选择参照物">
+              {SIZE_REFERENCES.map((item) => (
+                <button
+                  type="button"
+                  className={
+                    referenceObject.key === item.key ? "is-active" : ""
+                  }
+                  aria-pressed={referenceObject.key === item.key}
+                  key={item.key}
+                  onClick={() => setReferenceObjectKey(item.key)}
+                >
+                  <span
+                    className={`reference-object-icon ${item.shape}`}
+                    aria-hidden="true"
+                  />
+                  <span>
+                    <strong>{item.label}</strong>
+                    <small>
+                      {item.width} × {item.height} mm
+                    </small>
+                  </span>
+                </button>
+              ))}
+            </div>
+
+            <div className="reference-comparison">
+              <div className="reference-stage-wrap">
+                <div
+                  className="reference-stage"
+                  style={{
+                    aspectRatio: `${referenceStageWidth} / ${referenceStageHeight}`,
+                    maxWidth: `${
+                      (referenceStageWidth / referenceStageHeight) * 390
+                    }px`,
+                  }}
+                >
+                  <div
+                    className="reference-paper-shape"
+                    style={{
+                      width: `${
+                        (referencePaper.width / referenceStageWidth) * 100
+                      }%`,
+                      height: `${
+                        (referencePaper.height / referenceStageHeight) * 100
+                      }%`,
+                    }}
+                  >
+                    <strong>{referencePaper.label}</strong>
+                    <span className="reference-width-label">
+                      宽 {referencePaper.width} mm
+                    </span>
+                    <span className="reference-height-label">
+                      高 {referencePaper.height} mm
+                    </span>
+                  </div>
+                  <div
+                    className={`reference-object-shape ${referenceObject.shape}`}
+                    role="img"
+                    aria-label={`${referenceObject.label}，${referenceObject.width} × ${referenceObject.height} 毫米`}
+                    style={{
+                      left: `${
+                        ((referencePaper.width + referenceGapMm) /
+                          referenceStageWidth) *
+                        100
+                      }%`,
+                      width: `${
+                        (referenceObject.width / referenceStageWidth) * 100
+                      }%`,
+                      height: `${
+                        (referenceObject.height / referenceStageHeight) * 100
+                      }%`,
+                    }}
+                  >
+                    <span>{referenceObject.label}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="reference-readout">
+                <span className="eyebrow">当前对比</span>
+                <h3>
+                  {referencePaper.label} 与 {referenceObject.label}
+                </h3>
+                <div className="reference-edge-cards">
+                  <div>
+                    <small>纸张宽度</small>
+                    <strong>{referencePaper.width} mm</strong>
+                    <span>
+                      约{" "}
+                      {formatReferenceCount(
+                        referencePaper.width / referenceObjectLongEdge,
+                      )}{" "}
+                      个参照物长边
+                    </span>
+                  </div>
+                  <div>
+                    <small>纸张高度</small>
+                    <strong>{referencePaper.height} mm</strong>
+                    <span>
+                      约{" "}
+                      {formatReferenceCount(
+                        referencePaper.height / referenceObjectLongEdge,
+                      )}{" "}
+                      个参照物长边
+                    </span>
+                  </div>
+                </div>
+                <p>
+                  {referenceObject.label}：{referenceObject.width} ×{" "}
+                  {referenceObject.height} mm · {referenceObject.note}
+                </p>
+                <small className="reference-disclaimer">
+                  中性笔、课本、海绵和纸巾包会因品牌与型号不同而有偏差，仅用于建立直观尺度。
+                </small>
+              </div>
             </div>
           </section>
         </div>
@@ -1796,6 +2084,24 @@ export default function Home() {
               />
               <span className="switch" aria-hidden="true" />
             </label>
+          </section>
+
+          <section className="panel-section size-reference-entry">
+            <span className="eyebrow">纸张实感</span>
+            <h2>不清楚真实纸张大小？</h2>
+            <p>
+              用中性笔、手机、鼠标、充电器、课本或海绵，对照所有可用纸张规格。
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                setReferencePaperKey(settings.paperSize);
+                setShowSizeReference(true);
+              }}
+            >
+              查看真实比例参考图
+              <span aria-hidden="true">→</span>
+            </button>
           </section>
         </aside>
 

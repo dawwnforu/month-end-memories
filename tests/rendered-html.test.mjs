@@ -75,3 +75,25 @@ test("implements free crop and unlocked resizing", async () => {
   assert.match(css, /\.crop-selection/);
   assert.match(css, /\.crop-button/);
 });
+
+test("offers real-world paper size references", async () => {
+  const [page, css, readme] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+    readFile(new URL("../README.md", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(page, /SIZE_REFERENCES/);
+  assert.match(page, /showSizeReference/);
+  assert.match(page, /不清楚真实纸张大小？/);
+  assert.match(page, /常见中性笔/);
+  assert.match(page, /iPhone 15/);
+  assert.match(page, /罗技 M240 鼠标/);
+  assert.match(page, /Anker 523 充电器/);
+  assert.match(page, /学生课本/);
+  assert.match(page, /洗碗海绵/);
+  assert.match(css, /\.size-reference-modal/);
+  assert.match(css, /\.reference-stage/);
+  assert.match(css, /\.size-reference-entry/);
+  assert.match(readme, /纸张真实大小参考/);
+});
