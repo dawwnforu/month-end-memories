@@ -50,11 +50,28 @@ test("implements safe photo keyboard shortcuts and undo", async () => {
   assert.match(page, /event\.key === "-"/);
   assert.match(page, /event\.key\.toLowerCase\(\) === "r"/);
   assert.match(page, /undoLastAction\(\)/);
-  assert.match(page, /shortcutGuideRef/);
-  assert.match(page, /长边增加 1 mm/);
-  assert.match(page, /所有页面快捷键都会自动停用/);
-  assert.match(css, /\.shortcut-guide/);
+  assert.match(page, /shortcutDetailsRef/);
+  assert.match(page, /放大 1 mm/);
+  assert.match(page, /快捷键会自动停用/);
+  assert.match(css, /\.shortcut-disclosure/);
+  assert.match(css, /\.shortcut-question/);
   assert.doesNotMatch(page, /shortcut-modal/);
   assert.match(css, /\.shortcut-actions/);
   assert.match(readme, /## 快捷键/);
+});
+
+test("implements free crop and unlocked resizing", async () => {
+  const [page, css] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(page, /lockAspectRatio/);
+  assert.match(page, /beginCropDrag/);
+  assert.match(page, /applyCrop/);
+  assert.match(page, /drawCroppedImage/);
+  assert.match(page, /自由裁剪/);
+  assert.match(page, /自由尺寸/);
+  assert.match(css, /\.crop-selection/);
+  assert.match(css, /\.crop-button/);
 });

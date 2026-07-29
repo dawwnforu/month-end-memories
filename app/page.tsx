@@ -23,6 +23,15 @@ type Photo = {
   widthMm: number;
   heightMm: number;
   quantity: number;
+  lockAspectRatio: boolean;
+  crop: CropArea;
+};
+
+type CropArea = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
 };
 
 type PaperSizeKey =
@@ -84,6 +93,7 @@ type PackResult = {
 };
 
 type ResizeCorner = "nw" | "ne" | "sw" | "se";
+type CropDragMode = ResizeCorner | "move";
 
 const PAPER_SIZES: Record<
   PaperSizeKey,
@@ -104,6 +114,21 @@ const EPSILON = 0.001;
 
 function roundMm(value: number) {
   return Math.round(value * 10) / 10;
+}
+
+function cropBackgroundStyle(photo: Photo) {
+  const crop = photo.crop;
+  const xPosition =
+    crop.width >= 1 ? 0 : (crop.x / (1 - crop.width)) * 100;
+  const yPosition =
+    crop.height >= 1 ? 0 : (crop.y / (1 - crop.height)) * 100;
+
+  return {
+    backgroundImage: `url("${photo.src}")`,
+    backgroundPosition: `${xPosition}% ${yPosition}%`,
+    backgroundRepeat: "no-repeat",
+    backgroundSize: `${100 / crop.width}% ${100 / crop.height}%`,
+  };
 }
 
 function expandPhotos(photos: Photo[]): PackItem[] {
@@ -456,6 +481,10 @@ export default function Home() {
   const [duplicateNotice, setDuplicateNotice] = useState<{
     count: number;
   } | null>(null);
+  const [cropEditor, setCropEditor] = useState<{
+    photoId: string;
+    draft: CropArea;
+  } | null>(null);
   const [undoDepth, setUndoDepth] = useState(0);
   const [selectedPlacementKey, setSelectedPlacementKey] = useState<
     string | null
@@ -476,7 +505,7 @@ export default function Home() {
   const photosRef = useRef(photos);
   const settingsRef = useRef(settings);
   const selectedPlacementKeyRef = useRef(selectedPlacementKey);
-  const shortcutGuideRef = useRef<HTMLElement | null>(null);
+  const shortcutDetailsRef = useRef<HTMLDetailsElement | null>(null);
 
   useEffect(() => {
     photosRef.current = photos;
@@ -530,7 +559,10 @@ export default function Home() {
 
   function rememberForUndo() {
     undoHistory.current.push({
-      photos: photosRef.current.map((photo) => ({ ...photo })),
+      photos: photosRef.current.map((photo) => ({
+        ...photo,
+        crop: { ...photo.crop },
+      })),
       settings: { ...settingsRef.current },
       selectedPlacementKey: selectedPlacementKeyRef.current,
     });
@@ -669,6 +701,8 @@ export default function Home() {
                 widthMm: roundMm(widthMm),
                 heightMm: roundMm(heightMm),
                 quantity: 1,
+                lockAspectRatio: true,
+                crop: { x: 0, y: 0, width: 1, height: 1 },
               });
             };
             image.onerror = () => {
@@ -743,15 +777,38 @@ export default function Home() {
           return {
             ...photo,
             widthMm: roundMm(value),
-            heightMm: roundMm(value / photo.ratio),
+            heightMm: photo.lockAspectRatio
+              ? roundMm(value / photo.ratio)
+              : photo.heightMm,
           };
         }
         return {
           ...photo,
           heightMm: roundMm(value),
-          widthMm: roundMm(value * photo.ratio),
+          widthMm: photo.lockAspectRatio
+            ? roundMm(value * photo.ratio)
+            : photo.widthMm,
         };
       }),
+    );
+  }
+
+  function toggleAspectLock(photoId: string) {
+    const target = photosRef.current.find((photo) => photo.id === photoId);
+    if (!target) return;
+    rememberForUndo();
+    setSelectedPlacementKey(`${photoId}-0`);
+    setPhotos((current) =>
+      current.map((photo) =>
+        photo.id === photoId
+          ? { ...photo, lockAspectRatio: !photo.lockAspectRatio }
+          : photo,
+      ),
+    );
+    setMessage(
+      target.lockAspectRatio
+        ? `${target.name} 已解除比例锁定，可分别调整宽和高。`
+        : `${target.name} 已恢复等比例缩放。`,
     );
   }
 
@@ -798,14 +855,12 @@ export default function Home() {
     rememberForUndo();
     setPhotos((current) =>
       current.map((photo) => {
-        const widthMm =
-          photo.ratio >= 1 ? longEdge : longEdge * photo.ratio;
-        const heightMm =
-          photo.ratio >= 1 ? longEdge / photo.ratio : longEdge;
+        const currentLongEdge = Math.max(photo.widthMm, photo.heightMm);
+        const scale = longEdge / currentLongEdge;
         return {
           ...photo,
-          widthMm: roundMm(widthMm),
-          heightMm: roundMm(heightMm),
+          widthMm: roundMm(photo.widthMm * scale),
+          heightMm: roundMm(photo.heightMm * scale),
         };
       }),
     );
@@ -841,6 +896,133 @@ export default function Home() {
     setMessage("照片已顺时针旋转 90°，版面已重新优化。");
   }
 
+  function openCropEditor(photoId: string) {
+    const photo = photosRef.current.find((item) => item.id === photoId);
+    if (!photo) return;
+    setSelectedPlacementKey(`${photoId}-0`);
+    setCropEditor({
+      photoId,
+      draft: { ...photo.crop },
+    });
+  }
+
+  function applyCrop() {
+    if (!cropEditor) return;
+    const target = photosRef.current.find(
+      (photo) => photo.id === cropEditor.photoId,
+    );
+    if (!target) {
+      setCropEditor(null);
+      return;
+    }
+
+    rememberForUndo();
+    const sourceRatio =
+      (target.naturalWidth * cropEditor.draft.width) /
+      (target.naturalHeight * cropEditor.draft.height);
+    const ratio =
+      target.rotationTurns % 2 === 1 ? 1 / sourceRatio : sourceRatio;
+    const currentLongEdge = Math.max(target.widthMm, target.heightMm);
+
+    setPhotos((current) =>
+      current.map((photo) => {
+        if (photo.id !== target.id) return photo;
+        if (!photo.lockAspectRatio) {
+          return {
+            ...photo,
+            crop: { ...cropEditor.draft },
+            ratio,
+          };
+        }
+        return {
+          ...photo,
+          crop: { ...cropEditor.draft },
+          ratio,
+          widthMm: roundMm(ratio >= 1 ? currentLongEdge : currentLongEdge * ratio),
+          heightMm: roundMm(ratio >= 1 ? currentLongEdge / ratio : currentLongEdge),
+        };
+      }),
+    );
+    setCropEditor(null);
+    setMessage(`${target.name} 已完成自由裁剪，版面已重新排列。`);
+  }
+
+  function beginCropDrag(
+    event: ReactPointerEvent<HTMLElement>,
+    mode: CropDragMode,
+  ) {
+    if (!cropEditor) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const shell = event.currentTarget.closest(
+      ".crop-image-shell",
+    ) as HTMLElement | null;
+    if (!shell) return;
+
+    const bounds = shell.getBoundingClientRect();
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const start = { ...cropEditor.draft };
+    const minSize = 0.05;
+
+    const handlePointerMove = (moveEvent: PointerEvent) => {
+      const dx = (moveEvent.clientX - startX) / bounds.width;
+      const dy = (moveEvent.clientY - startY) / bounds.height;
+      let left = start.x;
+      let top = start.y;
+      let right = start.x + start.width;
+      let bottom = start.y + start.height;
+
+      if (mode === "move") {
+        left = Math.max(0, Math.min(1 - start.width, start.x + dx));
+        top = Math.max(0, Math.min(1 - start.height, start.y + dy));
+        right = left + start.width;
+        bottom = top + start.height;
+      } else {
+        if (mode === "nw" || mode === "sw") {
+          left = Math.max(0, Math.min(right - minSize, start.x + dx));
+        }
+        if (mode === "ne" || mode === "se") {
+          right = Math.min(
+            1,
+            Math.max(left + minSize, start.x + start.width + dx),
+          );
+        }
+        if (mode === "nw" || mode === "ne") {
+          top = Math.max(0, Math.min(bottom - minSize, start.y + dy));
+        }
+        if (mode === "sw" || mode === "se") {
+          bottom = Math.min(
+            1,
+            Math.max(top + minSize, start.y + start.height + dy),
+          );
+        }
+      }
+
+      const draft = {
+        x: left,
+        y: top,
+        width: right - left,
+        height: bottom - top,
+      };
+      setCropEditor((current) =>
+        current?.photoId === cropEditor.photoId
+          ? { ...current, draft }
+          : current,
+      );
+    };
+
+    const handlePointerUp = () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+      window.removeEventListener("pointercancel", handlePointerUp);
+    };
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+    window.addEventListener("pointercancel", handlePointerUp);
+  }
+
   function beginDirectResize(
     event: ReactPointerEvent<HTMLButtonElement>,
     photo: Photo,
@@ -872,16 +1054,43 @@ export default function Home() {
     const maxScale = Math.min(400 / startWidth, 400 / startHeight);
 
     const handlePointerMove = (moveEvent: PointerEvent) => {
-      const currentDistance = Math.hypot(
-        moveEvent.clientX - opposite.x,
-        moveEvent.clientY - opposite.y,
-      );
-      const scale = Math.max(
-        minScale,
-        Math.min(maxScale, currentDistance / startDistance),
-      );
-      const widthMm = roundMm(startWidth * scale);
-      const heightMm = roundMm(startHeight * scale);
+      let widthMm: number;
+      let heightMm: number;
+      if (photo.lockAspectRatio) {
+        const currentDistance = Math.hypot(
+          moveEvent.clientX - opposite.x,
+          moveEvent.clientY - opposite.y,
+        );
+        const scale = Math.max(
+          minScale,
+          Math.min(maxScale, currentDistance / startDistance),
+        );
+        widthMm = roundMm(startWidth * scale);
+        heightMm = roundMm(startHeight * scale);
+      } else {
+        const horizontalScale = Math.max(
+          10 / placement.width,
+          Math.abs(moveEvent.clientX - opposite.x) / bounds.width,
+        );
+        const verticalScale = Math.max(
+          10 / placement.height,
+          Math.abs(moveEvent.clientY - opposite.y) / bounds.height,
+        );
+        widthMm = roundMm(
+          Math.min(
+            400,
+            startWidth *
+              (placement.rotated ? verticalScale : horizontalScale),
+          ),
+        );
+        heightMm = roundMm(
+          Math.min(
+            400,
+            startHeight *
+              (placement.rotated ? horizontalScale : verticalScale),
+          ),
+        );
+      }
       setResizeDraft({ key: placement.key, corner });
       setPhotos((current) =>
         current.map((item) =>
@@ -930,6 +1139,14 @@ export default function Home() {
         return;
       }
 
+      if (cropEditor) {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          setCropEditor(null);
+        }
+        return;
+      }
+
       if (
         (event.ctrlKey || event.metaKey) &&
         !event.altKey &&
@@ -942,11 +1159,11 @@ export default function Home() {
 
       if (event.key === "?") {
         event.preventDefault();
-        shortcutGuideRef.current?.scrollIntoView({
-          behavior: "smooth",
-          block: "nearest",
-        });
-        shortcutGuideRef.current?.focus({ preventScroll: true });
+        const details = shortcutDetailsRef.current;
+        if (details) {
+          details.open = !details.open;
+          details.querySelector("summary")?.focus();
+        }
         return;
       }
 
@@ -1035,23 +1252,42 @@ export default function Home() {
           const height = placement.height * scale;
           const totalTurns =
             (photo.rotationTurns + (placement.rotated ? 1 : 0)) % 4;
+          const sourceX = photo.crop.x * image.naturalWidth;
+          const sourceY = photo.crop.y * image.naturalHeight;
+          const sourceWidth = photo.crop.width * image.naturalWidth;
+          const sourceHeight = photo.crop.height * image.naturalHeight;
+          const drawCroppedImage = (
+            destinationWidth: number,
+            destinationHeight: number,
+          ) =>
+            context.drawImage(
+              image,
+              sourceX,
+              sourceY,
+              sourceWidth,
+              sourceHeight,
+              0,
+              0,
+              destinationWidth,
+              destinationHeight,
+            );
 
           context.save();
           context.translate(x, y);
           if (totalTurns === 1) {
             context.translate(width, 0);
             context.rotate(Math.PI / 2);
-            context.drawImage(image, 0, 0, height, width);
+            drawCroppedImage(height, width);
           } else if (totalTurns === 2) {
             context.translate(width, height);
             context.rotate(Math.PI);
-            context.drawImage(image, 0, 0, width, height);
+            drawCroppedImage(width, height);
           } else if (totalTurns === 3) {
             context.translate(0, height);
             context.rotate(-Math.PI / 2);
-            context.drawImage(image, 0, 0, height, width);
+            drawCroppedImage(height, width);
           } else {
-            context.drawImage(image, 0, 0, width, height);
+            drawCroppedImage(width, height);
           }
           context.restore();
         });
@@ -1091,6 +1327,10 @@ export default function Home() {
     }
   }
 
+  const cropPhoto = cropEditor
+    ? photos.find((photo) => photo.id === cropEditor.photoId) ?? null
+    : null;
+
   return (
     <main className="app-shell">
       {duplicateNotice && (
@@ -1121,6 +1361,100 @@ export default function Home() {
             >
               知道了
             </button>
+          </section>
+        </div>
+      )}
+      {cropEditor && cropPhoto && (
+        <div
+          className="crop-modal-layer"
+          role="presentation"
+          onMouseDown={() => setCropEditor(null)}
+        >
+          <section
+            className="crop-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="crop-modal-title"
+            aria-describedby="crop-modal-description"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="crop-modal-heading">
+              <div>
+                <span className="eyebrow">自由裁剪</span>
+                <h2 id="crop-modal-title">{cropPhoto.name}</h2>
+              </div>
+              <button
+                type="button"
+                className="crop-modal-close"
+                aria-label="关闭裁剪"
+                onClick={() => setCropEditor(null)}
+                autoFocus
+              >
+                ×
+              </button>
+            </div>
+            <p id="crop-modal-description">
+              拖动裁剪框可移动选区，拖动四角可自由改变裁剪范围。
+            </p>
+            <div className="crop-workspace">
+              <div className="crop-image-shell">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={cropPhoto.src} alt={`裁剪 ${cropPhoto.name}`} />
+                <div
+                  className="crop-selection"
+                  style={{
+                    left: `${cropEditor.draft.x * 100}%`,
+                    top: `${cropEditor.draft.y * 100}%`,
+                    width: `${cropEditor.draft.width * 100}%`,
+                    height: `${cropEditor.draft.height * 100}%`,
+                  }}
+                  onPointerDown={(event) => beginCropDrag(event, "move")}
+                >
+                  {(["nw", "ne", "sw", "se"] as ResizeCorner[]).map(
+                    (corner) => (
+                      <button
+                        type="button"
+                        className={`crop-handle ${corner}`}
+                        key={corner}
+                        aria-label={`拖动${corner}角裁剪`}
+                        onPointerDown={(event) =>
+                          beginCropDrag(event, corner)
+                        }
+                      />
+                    ),
+                  )}
+                </div>
+              </div>
+            </div>
+            <div className="crop-modal-actions">
+              <button
+                type="button"
+                className="crop-reset-button"
+                onClick={() =>
+                  setCropEditor((current) =>
+                    current
+                      ? {
+                          ...current,
+                          draft: { x: 0, y: 0, width: 1, height: 1 },
+                        }
+                      : current,
+                  )
+                }
+              >
+                恢复原图
+              </button>
+              <span />
+              <button type="button" onClick={() => setCropEditor(null)}>
+                取消
+              </button>
+              <button
+                type="button"
+                className="crop-apply-button"
+                onClick={applyCrop}
+              >
+                应用裁剪
+              </button>
+            </div>
           </section>
         </div>
       )}
@@ -1219,8 +1553,12 @@ export default function Home() {
                       key={photo.id}
                     >
                       <div className="photo-thumb">
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={photo.src} alt="" />
+                        <div
+                          className="photo-thumb-image"
+                          role="img"
+                          aria-label={photo.name}
+                          style={cropBackgroundStyle(photo)}
+                        />
                         <span>{String(index + 1).padStart(2, "0")}</span>
                       </div>
                       <div className="photo-fields">
@@ -1260,9 +1598,25 @@ export default function Home() {
                               mm
                             </span>
                           </label>
-                          <span className="dimension-link" aria-hidden="true">
-                            ∞
-                          </span>
+                          <button
+                            type="button"
+                            className={`dimension-link ${
+                              photo.lockAspectRatio ? "is-locked" : ""
+                            }`}
+                            aria-label={
+                              photo.lockAspectRatio
+                                ? `解除 ${photo.name} 的宽高比例锁定`
+                                : `锁定 ${photo.name} 的宽高比例`
+                            }
+                            title={
+                              photo.lockAspectRatio
+                                ? "已锁定比例，点击后可自由调整宽高"
+                                : "自由尺寸，点击恢复等比例缩放"
+                            }
+                            onClick={() => toggleAspectLock(photo.id)}
+                          >
+                            {photo.lockAspectRatio ? "∞" : "↔"}
+                          </button>
                           <label>
                             高
                             <span>
@@ -1301,6 +1655,25 @@ export default function Home() {
                               />
                             </span>
                           </label>
+                        </div>
+                        <div className="photo-edit-actions">
+                          <button
+                            type="button"
+                            onClick={() => openCropEditor(photo.id)}
+                          >
+                            ✂ 自由裁剪
+                          </button>
+                          <button
+                            type="button"
+                            className={
+                              photo.lockAspectRatio ? "" : "is-active"
+                            }
+                            onClick={() => toggleAspectLock(photo.id)}
+                          >
+                            {photo.lockAspectRatio
+                              ? "🔗 等比例"
+                              : "↔ 自由尺寸"}
+                          </button>
                         </div>
                       </div>
                     </article>
@@ -1432,7 +1805,7 @@ export default function Home() {
               <span className="eyebrow">03 · 自动排版</span>
               <h2>{paper.label} 打印预览</h2>
               <p className="preview-instruction">
-                点击照片，拖动四角控制点即可等比例缩放
+                点击照片拖动四角缩放；解除比例锁定后可自由改变宽高
               </p>
               <div className="shortcut-actions">
                 <button
@@ -1443,19 +1816,38 @@ export default function Home() {
                 >
                   ↶ 撤销
                 </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    shortcutGuideRef.current?.scrollIntoView({
-                      behavior: "smooth",
-                      block: "nearest",
-                    });
-                    shortcutGuideRef.current?.focus({ preventScroll: true });
-                  }}
-                  title="定位右侧快捷键说明（?）"
+                <details
+                  className="shortcut-disclosure"
+                  ref={shortcutDetailsRef}
                 >
-                  ⌨ 快捷键
-                </button>
+                  <summary title="查看快捷键（?）">
+                    <span className="shortcut-question" aria-hidden="true">
+                      ?
+                    </span>
+                    快捷键
+                  </summary>
+                  <div className="shortcut-dropdown">
+                    <p>先选中照片，再使用快捷键：</p>
+                    <dl>
+                      <div>
+                        <dt><kbd>Delete</kbd><span>/</span><kbd>Backspace</kbd></dt>
+                        <dd>删除照片</dd>
+                      </div>
+                      <div><dt><kbd>＋</kbd></dt><dd>放大 1 mm</dd></div>
+                      <div><dt><kbd>－</kbd></dt><dd>缩小 1 mm</dd></div>
+                      <div><dt><kbd>R</kbd></dt><dd>旋转 90°</dd></div>
+                      <div>
+                        <dt><kbd>Ctrl/⌘</kbd><span>＋</span><kbd>Z</kbd></dt>
+                        <dd>撤销</dd>
+                      </div>
+                      <div><dt><kbd>Esc</kbd></dt><dd>取消选择</dd></div>
+                      <div><dt><kbd>?</kbd></dt><dd>开关提示</dd></div>
+                    </dl>
+                    <small>
+                      输入尺寸、份数、边距或缝隙时，快捷键会自动停用。
+                    </small>
+                  </div>
+                </details>
               </div>
             </div>
             <div className="layout-stats">
@@ -1475,56 +1867,6 @@ export default function Home() {
               </div>
             </div>
           </div>
-
-          <section
-            className="shortcut-guide"
-            id="shortcut-guide"
-            ref={shortcutGuideRef}
-            tabIndex={-1}
-            aria-labelledby="shortcut-guide-title"
-          >
-            <div className="shortcut-guide-heading">
-              <div>
-                <span className="eyebrow">键盘快捷操作</span>
-                <h3 id="shortcut-guide-title">先选中照片，再按键调整</h3>
-              </div>
-              <p>
-                光标位于尺寸、份数、边距或缝隙输入框时，所有页面快捷键都会自动停用。
-              </p>
-            </div>
-            <dl className="shortcut-guide-grid">
-              <div>
-                <dt><kbd>Delete</kbd><span>/</span><kbd>Backspace</kbd></dt>
-                <dd>删除选中照片</dd>
-              </div>
-              <div>
-                <dt><kbd>＋</kbd></dt>
-                <dd>长边增加 1 mm</dd>
-              </div>
-              <div>
-                <dt><kbd>－</kbd></dt>
-                <dd>长边减少 1 mm</dd>
-              </div>
-              <div>
-                <dt><kbd>R</kbd></dt>
-                <dd>顺时针旋转 90°</dd>
-              </div>
-              <div>
-                <dt>
-                  <kbd>Ctrl</kbd><span>/</span><kbd>⌘</kbd><span>＋</span><kbd>Z</kbd>
-                </dt>
-                <dd>撤销上一步</dd>
-              </div>
-              <div>
-                <dt><kbd>Esc</kbd></dt>
-                <dd>取消照片选择</dd>
-              </div>
-              <div>
-                <dt><kbd>?</kbd></dt>
-                <dd>定位本操作说明</dd>
-              </div>
-            </dl>
-          </section>
 
           <div className="preview-stage">
             {photos.length === 0 ? (
@@ -1647,13 +1989,13 @@ export default function Home() {
                               }%`,
                             }}
                           >
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img
-                              src={photo.src}
-                              alt={photo.name}
-                              className={`turn-${totalTurns}`}
-                              style={
-                                isQuarterTurn
+                            <div
+                              className={`placed-photo-image turn-${totalTurns}`}
+                              role="img"
+                              aria-label={photo.name}
+                              style={{
+                                ...cropBackgroundStyle(photo),
+                                ...(isQuarterTurn
                                   ? {
                                       width: `${
                                         (placement.height / placement.width) *
@@ -1664,9 +2006,26 @@ export default function Home() {
                                         100
                                       }%`,
                                     }
-                                  : undefined
-                              }
+                                  : {}),
+                              }}
                             />
+                            {isSelected && (
+                              <button
+                                type="button"
+                                className="crop-button"
+                                aria-label={`自由裁剪 ${photo.name}`}
+                                title="自由裁剪"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  openCropEditor(photo.id);
+                                }}
+                                onPointerDown={(event) =>
+                                  event.stopPropagation()
+                                }
+                              >
+                                ✂
+                              </button>
+                            )}
                             <button
                               type="button"
                               className="rotation-button"
@@ -1686,6 +2045,7 @@ export default function Home() {
                                 <span className="direct-size-badge">
                                   {roundMm(photo.widthMm)} ×{" "}
                                   {roundMm(photo.heightMm)} mm
+                                  {photo.lockAspectRatio ? "" : " · 自由尺寸"}
                                 </span>
                                 {(
                                   ["nw", "ne", "sw", "se"] as ResizeCorner[]
