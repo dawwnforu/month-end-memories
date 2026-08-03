@@ -1457,7 +1457,35 @@ export default function Home() {
   );
 
   return (
-    <main className="app-shell">
+    <main
+      className="app-shell"
+      onCopy={(event) => {
+        if (isEditableTarget(event.target)) return;
+        event.preventDefault();
+        setMessage("页面说明文字与照片已启用防误复制保护。");
+      }}
+      onCut={(event) => {
+        if (isEditableTarget(event.target)) return;
+        event.preventDefault();
+        setMessage("页面固定内容不可剪切或修改。");
+      }}
+      onDragStart={(event) => {
+        if (isEditableTarget(event.target)) return;
+        event.preventDefault();
+      }}
+      onContextMenu={(event) => {
+        const target = event.target;
+        if (
+          target instanceof HTMLElement &&
+          target.closest(
+            ".brand-logo, .photo-thumb-image, .placed-photo-image, .crop-image-shell",
+          )
+        ) {
+          event.preventDefault();
+          setMessage("为保护照片，图片区域已禁用右键复制与拖拽。");
+        }
+      }}
+    >
       {duplicateNotice && (
         <div
           className="duplicate-modal-layer"
@@ -1524,7 +1552,11 @@ export default function Home() {
             <div className="crop-workspace">
               <div className="crop-image-shell">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={cropPhoto.src} alt={`裁剪 ${cropPhoto.name}`} />
+                <img
+                  src={cropPhoto.src}
+                  alt={`裁剪 ${cropPhoto.name}`}
+                  draggable={false}
+                />
                 <div
                   className="crop-selection"
                   style={{
@@ -1763,6 +1795,7 @@ export default function Home() {
               className="brand-logo"
               src="/brand-logo-v3.png"
               alt="月末拾光"
+              draggable={false}
             />
             <h1 className="visually-hidden">月末拾光</h1>
             <p>把值得纪念的照片，刚刚好地放进纸张里。</p>
@@ -1778,9 +1811,12 @@ export default function Home() {
             <span aria-hidden="true">?</span>
             问题反馈
           </a>
-          <div className="privacy-note">
+          <div
+            className="privacy-note"
+            title="照片不上传；页面文字与图片已防误选、拖拽和复制"
+          >
             <span aria-hidden="true">●</span>
-            照片仅在本机处理
+            本机处理 · 防误复制
           </div>
         </div>
       </header>

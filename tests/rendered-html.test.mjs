@@ -113,3 +113,22 @@ test("lets users opt in to importing duplicate images", async () => {
   assert.match(css, /\.duplicate-policy-row/);
   assert.match(readme, /允许图片重复/);
 });
+
+test("protects static text and local photos from casual copying", async () => {
+  const [page, css, readme] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+    readFile(new URL("../README.md", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(page, /onCopy=/);
+  assert.match(page, /onCut=/);
+  assert.match(page, /onDragStart=/);
+  assert.match(page, /onContextMenu=/);
+  assert.match(page, /draggable=\{false\}/);
+  assert.match(page, /本机处理 · 防误复制/);
+  assert.match(css, /user-select: none/);
+  assert.match(css, /caret-color: transparent/);
+  assert.match(css, /-webkit-user-drag: none/);
+  assert.match(readme, /网页无法阻止操作系统截图/);
+});
