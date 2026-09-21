@@ -11,8 +11,9 @@ import {
 } from "react";
 
 import { duplicateGroups, uniquePhotos, fingerprintImage, suspectedDuplicateGroups, originalPhotoName } from "./photo-tools";
+import NotebookPreview from "./notebook-preview";
 
-type Photo = {
+export type Photo = {
   id: string;
   name: string;
   src: string;
@@ -1427,7 +1428,17 @@ export default function Home() {
     referenceObject.height,
   );
 
+  function resizeForNotebook(photoId: string, width: number, height: number) {
+    if (![width, height].every((value) => Number.isFinite(value) && value >= 10 && value <= 400)) return;
+    const current = photosRef.current.find((photo) => photo.id === photoId);
+    if (!current || (current.widthMm === roundMm(width) && current.heightMm === roundMm(height))) return;
+    rememberForUndo();
+    setPhotos((previous) => previous.map((photo) => photo.id === photoId ? { ...photo, widthMm: roundMm(width), heightMm: roundMm(height) } : photo));
+    setMessage(`${current.name} 的打印尺寸已从本子预览同步为 ${roundMm(width)} × ${roundMm(height)} mm。`);
+  }
+
   return (
+    <NotebookPreview photos={photos} onSizeChange={resizeForNotebook} imageStyle={cropBackgroundStyle}>
     <main
       className="app-shell"
       onCopy={(event) => {
@@ -1449,7 +1460,7 @@ export default function Home() {
         if (
           target instanceof HTMLElement &&
           target.closest(
-            ".brand-logo, .photo-thumb-image, .placed-photo-image, .crop-image-shell",
+            ".brand-logo, .crop-image-shell",
           )
         ) {
           event.preventDefault();
@@ -1808,6 +1819,9 @@ export default function Home() {
           </div>
         </div>
         <div className="topbar-actions">
+          <button type="button" className="feedback-link" aria-haspopup="dialog" onClick={() => setDuplicateNotice(true)}>
+            重复检查{extraPhotoCount + suspectedDuplicates.length > 0 ? `（${extraPhotoCount} 张相同 · ${suspectedDuplicates.length} 组疑似）` : ""}
+          </button>
           <a
             className="feedback-link"
             href="https://github.com/dawwnforu/month-end-memories/issues/new?template=feedback.yml"
@@ -1932,6 +1946,7 @@ export default function Home() {
                 <div className="photo-list">
                   {photos.map((photo, index) => (
                     <article
+                      data-photo-id={photo.id}
                       id={`photo-card-${photo.id}`}
                       className={`photo-card ${matchedPhotoIds.has(photo.id) ? "is-search-match" : ""} ${
                         selectedPlacementKey?.startsWith(`${photo.id}-`) || activeResultKey === `unplaced-${photo.id}`
@@ -2045,6 +2060,7 @@ export default function Home() {
                           </label>
                         </div>
                         <div className="photo-edit-actions">
+                          <button type="button" data-notebook-open={photo.id}>在我的本子上预览</button>
                           <button
                             type="button"
                             onClick={() => openCropEditor(photo.id)}
@@ -2346,6 +2362,7 @@ export default function Home() {
                           totalTurns === 1 || totalTurns === 3;
                         return (
                           <div
+                            data-photo-id={photo.id}
                             id={`placement-${placement.key}`}
                             className={`placed-photo ${matchedPhotoIds.has(photo.id) ? "is-search-match" : ""} ${
                               isSelected ? "is-selected" : ""
@@ -2532,5 +2549,6 @@ export default function Home() {
         </section>
       </section>
     </main>
+    </NotebookPreview>
   );
 }

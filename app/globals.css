@@ -2189,3 +2189,34 @@ kbd {
 }
 @media (max-width: 600px) { .photo-finder-panel { top: auto; bottom: 16px; max-height: 40vh; } }
 @media print { .photo-finder-panel, .photo-search { display: none !important; } }
+
+.notebook-context-menu { position: fixed; z-index: 1200; padding: 6px; background: var(--paper); border: 1px solid var(--line); border-radius: 9px; box-shadow: var(--shadow); }
+.notebook-context-menu button { padding: 12px; background: transparent; border: 0; cursor: pointer; }
+.notebook-dialog { width: min(1180px, calc(100vw - 28px)); max-height: calc(100dvh - 28px); margin: auto; padding: 22px; border: 1px solid var(--line); border-radius: 18px; background: var(--paper); color: var(--ink); overflow: auto; }
+.notebook-dialog::backdrop { background: #20302999; }
+.notebook-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; position: sticky; top: -22px; z-index: 4; background: var(--paper); padding: 8px 0; }
+.notebook-heading h2 { margin: 5px 0; font-size: 23px; }
+.notebook-dialog button { border: 1px solid #b8c8bb; border-radius: 7px; background: #f3f6ef; color: var(--ink); padding: 8px 10px; cursor: pointer; }
+.notebook-heading > button { font-size: 24px; }
+.notebook-help { font-size: 13px; color: var(--ink-soft); line-height: 1.7; }
+.notebook-workspace { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 24px; margin-top: 16px; max-height: max(300px, calc(100dvh - 230px)); overflow: hidden; }
+.notebook-controls { display: grid; align-content: start; gap: 12px; overflow: auto; padding-right: 5px; }
+.notebook-controls h3 { margin: 0; font-size: 15px; }
+.notebook-controls label { display: grid; gap: 5px; font-size: 13px; }
+.notebook-controls input, .notebook-controls select { width: 100%; min-width: 0; border: 1px solid var(--line); border-radius: 7px; padding: 7px; background: white; }
+.notebook-controls fieldset { display: grid; gap: 10px; min-width: 0; padding: 12px; border: 1px solid var(--line); border-radius: 10px; }
+.notebook-controls p, .notebook-controls small { font-size: 12px; line-height: 1.6; margin: 0; }
+.notebook-photo-name { overflow-wrap: anywhere; font-size: 12px; }
+.notebook-presets { display: flex; flex-wrap: wrap; gap: 6px; }
+.notebook-stage { min-width: 0; padding: 20px 35px 35px; background: #e9e5dc; border-radius: 12px; overflow: auto; }
+.notebook-ruler { text-align: center; font-size: 13px; margin: 0 0 28px; }
+.notebook-page { position: relative; margin: 0 auto 28px; background-color: #fffefa; background-image: linear-gradient(to right, #6f846e22 1px, transparent 1px), linear-gradient(to bottom, #6f846e22 1px, transparent 1px); box-shadow: 0 5px 22px #20302925; outline: 1px solid #d0c8b7; }
+.notebook-photo { position: absolute; touch-action: none; cursor: move; user-select: none; box-shadow: 0 2px 7px #0003; }
+.notebook-photo-crop { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.notebook-photo.is-active { outline: 2px solid #2684ff; z-index: 2; }
+.notebook-photo.is-outside { outline: 2px solid #b94030; }
+.notebook-size-label { position: absolute; bottom: calc(100% + 4px); left: 0; white-space: nowrap; background: #203029; color: white; padding: 4px 7px; border-radius: 4px; font-size: 11px; pointer-events: none; }
+.notebook-dialog .notebook-resize { position: absolute; bottom: -12px; right: -12px; width: 26px; height: 26px; padding: 0; border: 2px solid #2684ff; background: white; touch-action: none; cursor: nwse-resize; }
+.photo-edit-actions { flex-wrap: wrap; }
+@media (max-width: 720px) { .notebook-workspace { grid-template-columns: 1fr; max-height: none; overflow: visible; } .notebook-dialog { padding: 14px; } .notebook-stage { padding: 24px; } .notebook-controls { grid-template-columns: 1fr 1fr; overflow: visible; } .notebook-controls fieldset, .notebook-controls h3, .notebook-controls small { grid-column: 1 / -1; } .topbar-actions { flex-wrap: wrap; gap: 5px; } }
+@media print { .notebook-dialog, .notebook-context-menu { display: none !important; } }
