@@ -26,10 +26,15 @@
     "start": "vinext start",
     "test": "npm run build && node --experimental-strip-types --test tests/*.test.mjs",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
-    "db:generate": "drizzle-kit generate"
+    "db:generate": "drizzle-kit generate",
+    "db:local": "wrangler d1 migrations apply DB --local --config wrangler.local.jsonc --persist-to .wrangler/state",
+    "test:database": "node tests/database.integration.mjs",
+    "typecheck": "wrangler types --config wrangler.local.jsonc && tsc --noEmit",
+    "test:photos": "node tests/create-load-photos.mjs"
   },
   "dependencies": {
     "drizzle-orm": "0.45.2",
+    "fflate": "0.7.4",
     "jspdf": "^4.2.1",
     "next": "16.2.6",
     "react": "19.2.6",

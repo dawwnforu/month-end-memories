@@ -6,8 +6,9 @@ import { outsideNotebook, resizeInNotebook } from "./notebook-geometry";
 
 type Position = { photoId: string; x: number; y: number; angle: number };
 
-export default function NotebookPreview({ photos, onSizeChange, imageStyle, children }: {
+export default function NotebookPreview({ photos, selectedPhotoIds, onSizeChange, imageStyle, children }: {
   photos: Photo[];
+  selectedPhotoIds: string[];
   onSizeChange: (id: string, width: number, height: number) => void;
   imageStyle: (photo: Photo) => CSSProperties;
   children: ReactNode;
@@ -87,7 +88,13 @@ export default function NotebookPreview({ photos, onSizeChange, imageStyle, chil
   }} onClick={(event) => {
     if (!(event.target instanceof HTMLElement)) return;
     const photoId = event.target.closest<HTMLElement>("[data-notebook-open]")?.dataset.notebookOpen;
-    if (photoId) openPhoto(photoId);
+    if (event.target.closest("[data-notebook-selection]")) {
+      const columns = Math.ceil(Math.sqrt(selectedPhotoIds.length));
+      // ponytail: spread centres for manual arrangement; large photos may overlap until moved.
+      setItems((current) => [...current, ...selectedPhotoIds.filter((id) => !current.some((item) => item.photoId === id)).map((photoId, index) => ({ photoId, x: book.width * ((index % columns) + 1) / (columns + 1), y: book.height * (Math.floor(index / columns) + 1) / (columns + 1), angle: 0 }))]);
+      setSelectedId(selectedPhotoIds[0] || ""); setMenu(null);
+      if (!dialog.current?.open) dialog.current?.showModal();
+    } else if (photoId) openPhoto(photoId);
     else if (!event.target.closest(".notebook-context-menu")) setMenu(null);
   }}>
     {children}

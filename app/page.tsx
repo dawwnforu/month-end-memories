@@ -10,13 +10,21 @@ import {
   useState,
 } from "react";
 
-import { duplicateGroups, uniquePhotos, fingerprintImage, suspectedDuplicateGroups, originalPhotoName } from "./photo-tools";
+import { duplicateGroups, uniquePhotos, fingerprintImage, previewImage, suspectedDuplicateGroups, originalPhotoName } from "./photo-tools";
+import { usePhotoDatabase } from "./use-photo-database";
+import { readMetadata, archivePaths } from "./photo-batch";
+import { orderPhotos, type PhotoOrder } from "./photo-order";
 import NotebookPreview from "./notebook-preview";
 
 export type Photo = {
   id: string;
   name: string;
   src: string;
+  previewSrc?: string;
+  originalFile?: File;
+  takenAt?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
   fingerprint: string;
   ratio: number;
   rotationTurns: number;
@@ -53,6 +61,12 @@ type Settings = {
   margin: number;
   gap: number;
   allowRotation: boolean;
+  strictColumns?: boolean;
+  columns?: number;
+  sortingEnabled?: boolean;
+  photoOrder?: PhotoOrder;
+  locationRadius?: number;
+  timeWindow?: number;
 };
 
 type UndoSnapshot = {
@@ -215,7 +229,7 @@ function cropBackgroundStyle(photo: Photo) {
     crop.height >= 1 ? 0 : (crop.y / (1 - crop.height)) * 100;
 
   return {
-    backgroundImage: `url("${photo.src}")`,
+    backgroundImage: `url("${photo.previewSrc ?? photo.src}")`,
     backgroundPosition: `${xPosition}% ${yPosition}%`,
     backgroundRepeat: "no-repeat",
     backgroundSize: `${100 / crop.width}% ${100 / crop.height}%`,
@@ -499,6 +513,32 @@ function calculateLayout(
 ): PackResult {
   const items = expandPhotos(photos);
   if (!items.length) return { pages: [], unplaced: [] };
+  if (settings.strictColumns || (settings.sortingEnabled && settings.photoOrder !== "import")) {
+    const width = paperWidth - settings.margin * 2;
+    const height = paperHeight - settings.margin * 2;
+    const columns = settings.strictColumns ? settings.columns ?? 2 : 1;
+    const columnWidth = (width - settings.gap * (columns - 1)) / columns;
+    const pages: PackedPage[] = [];
+    const unplaced: PackItem[] = [];
+    let row: Placement[] = [], y = 0, x = 0, rowHeight = 0;
+    const flush = () => {
+      if (!row.length) return;
+      if (!pages.length || y + rowHeight > height + EPSILON) { pages.push({ placements: [], freeRects: [] }); y = 0; }
+      const offset = settings.strictColumns ? 0 : (width - (x - settings.gap)) / 2;
+      pages[pages.length - 1].placements.push(...row.map((item) => ({ ...item, x: item.x + offset, y: y + (rowHeight - item.height) / 2 })));
+      y += rowHeight + settings.gap; row = []; x = 0; rowHeight = 0;
+    };
+    for (const item of items) {
+      let w = item.widthMm, h = item.heightMm, rotated = false;
+      if ((w > columnWidth + EPSILON || h > height + EPSILON) && settings.allowRotation && item.allowAutoRotation && h <= columnWidth + EPSILON && w <= height + EPSILON) { [w, h] = [h, w]; rotated = true; }
+      if (w > columnWidth + EPSILON || h > height + EPSILON) { unplaced.push(item); continue; }
+      if (row.length && (settings.strictColumns ? row.length === columns : x + w > width + EPSILON)) flush();
+      row.push({ ...item, width: w, height: h, rotated, x: settings.strictColumns ? row.length * (columnWidth + settings.gap) + (columnWidth - w) / 2 : x, y: 0 });
+      x += w + settings.gap; rowHeight = Math.max(rowHeight, h);
+    }
+    flush();
+    return { pages, unplaced };
+  }
 
   const sorters: Array<(a: PackItem, b: PackItem) => number> = [
     (a, b) => b.widthMm * b.heightMm - a.widthMm * a.heightMm,
@@ -551,6 +591,7 @@ function isEditableTarget(target: EventTarget | null) {
 
 export default function Home() {
   const [photos, setPhotos] = useState<Photo[]>([]);
+  const databaseStatus = usePhotoDatabase(photos);
   const [settings, setSettings] = useState<Settings>({
     paperSize: "a4",
     orientation: "portrait",
@@ -564,6 +605,16 @@ export default function Home() {
   const [message, setMessage] = useState("");
   const [duplicateNotice, setDuplicateNotice] = useState(false);
   const [skippedDuplicates, setSkippedDuplicates] = useState<Array<{ name: string; photoId: string }>>([]);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [showSettings, setShowSettings] = useState(false);
+  const [groupByDate, setGroupByDate] = useState(false);
+  const [batchBusy, setBatchBusy] = useState(false);
+  const selectedPhotos = photos.filter((photo) => selectedIds.includes(photo.id));
+  const orderedPhotos = useMemo(() => orderPhotos(photos, settings.sortingEnabled ? settings.photoOrder ?? "import" : "import", settings.locationRadius ?? 100, settings.timeWindow ?? 3), [photos, settings.sortingEnabled, settings.photoOrder, settings.locationRadius, settings.timeWindow]);
+  const listedPhotos = orderedPhotos.map((photo) => ({ photo, index: photos.indexOf(photo) }));
+  function togglePhoto(id: string) {
+    setSelectedIds((current) => current.includes(id) ? current.filter((value) => value !== id) : [...current, id]);
+  }
   const [photoQuery, setPhotoQuery] = useState("");
   const [activeResultKey, setActiveResultKey] = useState<string | null>(null);
   const [cropEditor, setCropEditor] = useState<{
@@ -594,6 +645,10 @@ export default function Home() {
   const photosRef = useRef(photos);
   const settingsRef = useRef(settings);
   const selectedPlacementKeyRef = useRef(selectedPlacementKey);
+  useEffect(() => {
+    const retained = new Set([...photos, ...undoHistory.current.flatMap((snapshot) => snapshot.photos)].flatMap((photo) => [photo.src, photo.previewSrc]));
+    for (const url of objectUrls.current) if (!retained.has(url)) { URL.revokeObjectURL(url); objectUrls.current.delete(url); }
+  }, [photos, undoDepth]);
   const shortcutDetailsRef = useRef<HTMLDetailsElement | null>(null);
 
   useEffect(() => {
@@ -613,8 +668,8 @@ export default function Home() {
         };
   const layout = useMemo(
     () =>
-      calculateLayout(photos, settings, paper.width, paper.height),
-    [photos, settings, paper.width, paper.height],
+      calculateLayout(orderedPhotos, settings, paper.width, paper.height),
+    [orderedPhotos, settings, paper.width, paper.height],
   );
 
   const totalCopies = photos.reduce(
@@ -778,12 +833,15 @@ export default function Home() {
       // Decode one image at a time so a large batch does not allocate all pixel buffers together.
       for (const file of files) {
         const src = URL.createObjectURL(file);
+        let previewSrc: string | undefined;
         try {
           const image = await loadBrowserImage(src);
           const fingerprint = await fingerprintImage(image);
+          previewSrc = await previewImage(image);
           const ratio = image.naturalWidth / image.naturalHeight;
           loaded.push({
-            id: crypto.randomUUID(), name: file.name, src, fingerprint, ratio,
+            id: crypto.randomUUID(), name: file.name, src, previewSrc, fingerprint, ratio,
+            originalFile: file, ...readMetadata(new Uint8Array(await file.arrayBuffer())),
             rotationTurns: 0, manualRotation: false,
             naturalWidth: image.naturalWidth, naturalHeight: image.naturalHeight,
             widthMm: roundMm(ratio >= 1 ? 70 : 70 * ratio),
@@ -791,8 +849,11 @@ export default function Home() {
             quantity: 1, lockAspectRatio: true,
             crop: { x: 0, y: 0, width: 1, height: 1 },
           });
+          image.src = "";
+          setMessage(`正在读取照片 ${loaded.length + unreadableCount} / ${files.length}…`);
         } catch {
           URL.revokeObjectURL(src);
+          if (previewSrc) URL.revokeObjectURL(previewSrc);
           unreadableCount += 1;
         }
       }
@@ -805,11 +866,13 @@ export default function Home() {
           if (existing) {
             skipped.push({ name: photo.name, photoId: existing.id });
             URL.revokeObjectURL(photo.src);
+            if (photo.previewSrc) URL.revokeObjectURL(photo.previewSrc);
             continue;
           }
         }
         next.push(photo);
         objectUrls.current.add(photo.src);
+        if (photo.previewSrc) objectUrls.current.add(photo.previewSrc);
       }
       const addedCount = next.length - photosRef.current.length;
       if (addedCount) {
@@ -1278,22 +1341,62 @@ export default function Home() {
     return () => window.removeEventListener("keydown", handleShortcut);
   });
 
-  async function exportPdf() {
-    if (!layout.pages.length || layout.unplaced.length) return;
+  async function shareOriginals() {
+    const files = selectedPhotos.map((photo) => photo.originalFile);
+    if (files.some((file) => !file) || !navigator.canShare?.({ files: files as File[] })) {
+      setMessage("当前浏览器不支持分享这些原图，请下载所选原图 ZIP 后自行转发。");
+      return;
+    }
+    try { await navigator.share({ files: files as File[] }); }
+    catch (error) { if (!(error instanceof Error && error.name === "AbortError")) setMessage("分享未完成，请下载原图后转发。"); }
+  }
+
+  async function saveOriginals(toFolder: boolean) {
+    if (!selectedPhotos.length || batchBusy) return;
+    type Directory = { getDirectoryHandle: (name: string, options: { create: boolean }) => Promise<Directory>; getFileHandle: (name: string, options: { create: boolean }) => Promise<{ createWritable: () => Promise<{ write: (data: Blob) => Promise<void>; close: () => Promise<void> }> }> };
+    const picker = (window as unknown as { showDirectoryPicker?: (options: { mode: string }) => Promise<Directory> }).showDirectoryPicker;
+    setBatchBusy(true);
+    try {
+      const root = toFolder && picker ? await picker.call(window, { mode: "readwrite" }) : null;
+      const items = selectedPhotos;
+      const files = await Promise.all(items.map(async (photo) => photo.originalFile ?? await (await fetch(photo.src)).blob()));
+      const paths = archivePaths(items, groupByDate);
+      if (root) {
+        // A fresh subfolder preserves all existing user files.
+        const directory = await root.getDirectoryHandle(`月末拾光-${crypto.randomUUID()}`, { create: true });
+        for (let i = 0; i < files.length; i++) {
+          const parts = paths[i].split("/");
+          const target = parts.length === 2 ? await directory.getDirectoryHandle(parts[0], { create: true }) : directory;
+          const handle = await target.getFileHandle(parts.at(-1)!, { create: true });
+          const writable = await handle.createWritable();
+          await writable.write(files[i]);
+          await writable.close();
+        }
+        setMessage(`已在新文件夹中保存 ${files.length} 张原图。`);
+      } else {
+        const { zipSync } = await import("fflate");
+        const entries: Record<string, Uint8Array> = Object.create(null);
+        for (let i = 0; i < files.length; i++) entries[paths[i]] = new Uint8Array(await files[i].arrayBuffer());
+        const url = URL.createObjectURL(new Blob([zipSync(entries, { level: 0 }) as Uint8Array<ArrayBuffer>], { type: "application/zip" }));
+        const link = document.createElement("a");
+        link.href = url; link.download = "月末拾光-所选原图.zip"; link.click();
+        setTimeout(() => URL.revokeObjectURL(url), 60000);
+        setMessage(toFolder ? "浏览器不支持直接保存文件夹，已下载 ZIP，解压即可查看分类文件夹。" : `已导出 ${files.length} 张原图，保留原始文件及拍摄信息。`);
+      }
+    } catch (error) {
+      if (!(error instanceof Error && error.name === "AbortError")) setMessage("保存未完成，文件夹中可能有部分已保存的照片，请检查后重试。");
+    } finally { setBatchBusy(false); }
+  }
+
+  async function exportPdf(exportPhotos = orderedPhotos) {
+    exportPhotos = orderPhotos(exportPhotos, settings.sortingEnabled ? settings.photoOrder ?? "import" : "import", settings.locationRadius ?? 100, settings.timeWindow ?? 3);
+    const exportLayout = calculateLayout(exportPhotos, settings, paper.width, paper.height);
+    if (!exportLayout.pages.length || exportLayout.unplaced.length) { setMessage("请先调整过大的照片尺寸，再导出 PDF。"); return; }
     setIsExporting(true);
     setMessage(`正在按 300 DPI 生成 ${paper.label} PDF，请稍候…`);
 
     try {
-      const [{ jsPDF }, imageEntries] = await Promise.all([
-        import("jspdf"),
-        Promise.all(
-          photos.map(async (photo) => [
-            photo.id,
-            await loadBrowserImage(photo.src),
-          ] as const),
-        ),
-      ]);
-      const imageMap = new Map(imageEntries);
+      const { jsPDF } = await import("jspdf");
       const orientation =
         settings.orientation === "portrait" ? "portrait" : "landscape";
       const pdf = new jsPDF({
@@ -1304,7 +1407,7 @@ export default function Home() {
       });
       const scale = 300 / 25.4;
 
-      for (let pageIndex = 0; pageIndex < layout.pages.length; pageIndex += 1) {
+      for (let pageIndex = 0; pageIndex < exportLayout.pages.length; pageIndex += 1) {
         if (pageIndex > 0) {
           pdf.addPage([paper.width, paper.height], orientation);
         }
@@ -1320,12 +1423,12 @@ export default function Home() {
         context.imageSmoothingEnabled = true;
         context.imageSmoothingQuality = "high";
 
-        layout.pages[pageIndex].placements.forEach((placement) => {
-          const image = imageMap.get(placement.photoId);
-          const photo = photos.find(
+        for (const placement of exportLayout.pages[pageIndex].placements) {
+          const photo = exportPhotos.find(
             (item) => item.id === placement.photoId,
           );
-          if (!image || !photo) return;
+          if (!photo) continue;
+          const image = await loadBrowserImage(photo.src);
 
           const x = (settings.margin + placement.x) * scale;
           const y = (settings.margin + placement.y) * scale;
@@ -1372,7 +1475,8 @@ export default function Home() {
             drawCroppedImage(width, height);
           }
           context.restore();
-        });
+          image.src = "";
+        }
 
         const pageImage = canvas.toDataURL("image/jpeg", 0.96);
         pdf.addImage(
@@ -1385,6 +1489,8 @@ export default function Home() {
           undefined,
           "FAST",
         );
+        canvas.width = canvas.height = 0;
+        setMessage(`正在生成 PDF：${pageIndex + 1} / ${exportLayout.pages.length} 页…`);
         await new Promise<void>((resolve) =>
           requestAnimationFrame(() => resolve()),
         );
@@ -1396,7 +1502,7 @@ export default function Home() {
       ).padStart(2, "0")}.pdf`;
       pdf.save(fileName);
       setMessage(
-        `PDF 已生成，共 ${layout.pages.length} 页。打印时请选择“实际大小 / 100%”。`,
+        `PDF 已生成，共 ${exportLayout.pages.length} 页。打印时请选择“实际大小 / 100%”。`,
       );
     } catch (error) {
       setMessage(
@@ -1438,7 +1544,7 @@ export default function Home() {
   }
 
   return (
-    <NotebookPreview photos={photos} onSizeChange={resizeForNotebook} imageStyle={cropBackgroundStyle}>
+    <NotebookPreview photos={photos} selectedPhotoIds={selectedPhotos.map((photo) => photo.id)} onSizeChange={resizeForNotebook} imageStyle={cropBackgroundStyle}>
     <main
       className="app-shell"
       onCopy={(event) => {
@@ -1485,7 +1591,7 @@ export default function Home() {
                 {group.map((photo) => (
                   <div key={photo.id}>
                     {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img className="duplicate-preview" src={photo.src} alt={photo.name} draggable={false} />
+                    <img className="duplicate-preview" src={photo.previewSrc ?? photo.src} alt={photo.name} draggable={false} />
                     <span>{photo.name}{photo.id === group[0].id ? "（保留）" : ""}</span>
                     <small>{photo.naturalWidth} × {photo.naturalHeight} px</small>
                     {locations.filter((result) => result.photo.id === photo.id).map((result) => (
@@ -1819,6 +1925,19 @@ export default function Home() {
           </div>
         </div>
         <div className="topbar-actions">
+          <div className="settings-menu">
+            <button type="button" className="feedback-link" aria-expanded={showSettings} aria-controls="photo-settings" onClick={() => setShowSettings(!showSettings)}>设置</button>
+            {showSettings && <section id="photo-settings" className="settings-popover" aria-label="排版设置" onKeyDown={(event) => { if (event.key === "Escape") setShowSettings(false); }}>
+              <label><input type="checkbox" checked={!settings.allowRotation} onChange={(event) => updateSetting("allowRotation", !event.target.checked)} />不允许图片自动旋转</label>
+              <small>保留上传时的朝向；手动旋转仍由你控制。</small>
+              <label><input type="checkbox" checked={!!settings.strictColumns} onChange={(event) => updateSetting("strictColumns", event.target.checked)} />开启严格分栏</label>
+              {settings.strictColumns && <label>每页栏数<select value={settings.columns ?? 2} onChange={(event) => updateSetting("columns", Number(event.target.value))}>{[1, 2, 3, 4].map((n) => <option key={n} value={n}>{n} 栏</option>)}</select></label>}
+              <small>照片在各栏居中、按行对齐；过宽时提示调整尺寸。</small>
+              <label><input type="checkbox" checked={!!settings.sortingEnabled} onChange={(event) => updateSetting("sortingEnabled", event.target.checked)} />开启排序筛选</label>
+              <small>在左侧选择时间或地点；预览与 PDF 同步按顺序排列。</small>
+              <button type="button" onClick={() => setShowSettings(false)}>收起设置</button>
+            </section>}
+          </div>
           <button type="button" className="feedback-link" aria-haspopup="dialog" onClick={() => setDuplicateNotice(true)}>
             重复检查{extraPhotoCount + suspectedDuplicates.length > 0 ? `（${extraPhotoCount} 张相同 · ${suspectedDuplicates.length} 组疑似）` : ""}
           </button>
@@ -1833,10 +1952,10 @@ export default function Home() {
           </a>
           <div
             className="privacy-note"
-            title="照片不上传；页面文字与图片已防误选、拖拽和复制"
+            title="原图留在本机；拍摄时间、GPS、文件名和排版参数保存到当前工作区数据库"
           >
             <span aria-hidden="true">●</span>
-            本机处理 · 防误复制
+            原图留在本机
           </div>
         </div>
       </header>
@@ -1943,18 +2062,39 @@ export default function Home() {
                   </div>}
                   <button type="button" onClick={() => setDuplicateNotice(true)}>检查重复图片（{extraPhotoCount} 张相同 · {suspectedDuplicates.length} 组疑似）</button>
                 </div>
+                <div className="batch-tools" aria-label="照片批量操作">
+                  <small role="status">{databaseStatus} · 原图不入库</small>
+                  <div className="batch-buttons"><strong aria-live="polite">已选 {selectedPhotos.length} 张</strong><button type="button" onClick={() => setSelectedIds(photos.map((photo) => photo.id))}>全选</button><button type="button" onClick={() => setSelectedIds([])}>取消选择</button></div>
+                  <small>勾选左侧方框，或按住 Ctrl / ⌘ 点击照片多选。</small>
+                  {settings.sortingEnabled && <>
+                    <label>排序分类<select aria-label="照片排序分类" value={settings.photoOrder ?? "import"} onChange={(event) => updateSetting("photoOrder", event.target.value as PhotoOrder)}><option value="import">导入顺序</option><option value="oldest">拍摄时间升序</option><option value="newest">拍摄时间降序</option><option value="location">按拍摄地点分类</option><option value="smart">智能：同日相近时间、同地点优先</option></select></label>
+                    <label>同地点范围<select value={settings.locationRadius ?? 100} onChange={(event) => updateSetting("locationRadius", Number(event.target.value))}>{[30, 100, 300, 1000].map((n) => <option key={n} value={n}>{n} 米</option>)}</select></label>
+                    <label>相近时间<select value={settings.timeWindow ?? 3} onChange={(event) => updateSetting("timeWindow", Number(event.target.value))}>{[1, 3, 6, 12].map((n) => <option key={n} value={n}>{n} 小时内</option>)}</select></label>
+                    <small>地点按 GPS 距离归组，缺失元数据不推测。智能分类把同一天、时间范围内的 A→B→A 排为 A→A→B。</small>
+                  </>}
+                  <label className="batch-check"><input type="checkbox" checked={groupByDate} onChange={(event) => setGroupByDate(event.target.checked)} />保存原图时按拍摄日期分文件夹</label>
+                  <div className="batch-buttons">
+                    <button type="button" disabled={!selectedPhotos.length || isExporting} onClick={() => void exportPdf(selectedPhotos)}>导出所选 PDF</button>
+                    <button type="button" disabled={!selectedPhotos.length || batchBusy} onClick={() => void saveOriginals(false)}>下载所选原图 ZIP</button>
+                    <button type="button" disabled={!selectedPhotos.length || batchBusy} onClick={() => void saveOriginals(true)}>另存为文件夹</button>
+                    <button type="button" disabled={!selectedPhotos.length || batchBusy} onClick={() => void shareOriginals()}>分享所选原图</button>
+                    <button type="button" disabled={!selectedPhotos.length} data-notebook-selection>在我的本子上预览所选</button>
+                  </div>
+                </div>
                 <div className="photo-list">
-                  {photos.map((photo, index) => (
+                  {listedPhotos.map(({ photo, index }) => (
                     <article
                       data-photo-id={photo.id}
                       id={`photo-card-${photo.id}`}
-                      className={`photo-card ${matchedPhotoIds.has(photo.id) ? "is-search-match" : ""} ${
+                      className={`photo-card ${selectedIds.includes(photo.id) ? "is-batch-selected" : ""} ${matchedPhotoIds.has(photo.id) ? "is-search-match" : ""} ${
                         selectedPlacementKey?.startsWith(`${photo.id}-`) || activeResultKey === `unplaced-${photo.id}`
                           ? "is-selected"
                           : ""
                       }`}
                       key={photo.id}
+                      onClick={(event) => { if ((event.ctrlKey || event.metaKey) && !(event.target as HTMLElement).closest("button,input,select")) togglePhoto(photo.id); }}
                     >
+                      <input className="photo-checkbox" type="checkbox" aria-label={"多选 " + photo.name} checked={selectedIds.includes(photo.id)} onChange={() => togglePhoto(photo.id)} />
                       <div className="photo-thumb">
                         <div
                           className="photo-thumb-image"
@@ -1971,6 +2111,8 @@ export default function Home() {
                             <small>
                               {photo.naturalWidth} × {photo.naturalHeight} px
                             </small>
+                            <small>拍摄：{photo.takenAt?.replace("T", " ") || "日期未知"}</small>
+                            <small>地点：{photo.latitude != null && photo.longitude != null ? `${photo.latitude.toFixed(4)}, ${photo.longitude.toFixed(4)}` : "地点未知"}</small>
                           </div>
                           <button
                             className="remove-button"
@@ -2186,20 +2328,6 @@ export default function Home() {
               </label>
             </div>
 
-            <label className="switch-row">
-              <span>
-                <strong>允许照片旋转 90°</strong>
-                <small>横拍、竖拍自由混排，更省纸</small>
-              </span>
-              <input
-                type="checkbox"
-                checked={settings.allowRotation}
-                onChange={(event) =>
-                  updateSetting("allowRotation", event.target.checked)
-                }
-              />
-              <span className="switch" aria-hidden="true" />
-            </label>
           </section>
 
           <section className="panel-section size-reference-entry">
@@ -2364,7 +2492,7 @@ export default function Home() {
                           <div
                             data-photo-id={photo.id}
                             id={`placement-${placement.key}`}
-                            className={`placed-photo ${matchedPhotoIds.has(photo.id) ? "is-search-match" : ""} ${
+                            className={`placed-photo ${selectedIds.includes(photo.id) ? "is-batch-selected" : ""} ${matchedPhotoIds.has(photo.id) ? "is-search-match" : ""} ${
                               isSelected ? "is-selected" : ""
                             } ${
                               resizeDraft?.key === placement.key
@@ -2377,7 +2505,8 @@ export default function Home() {
                             aria-label={`选择并缩放 ${photo.name}`}
                             onClick={(event) => {
                               event.stopPropagation();
-                              setSelectedPlacementKey(placement.key);
+                              if (event.ctrlKey || event.metaKey) togglePhoto(photo.id);
+                              else setSelectedPlacementKey(placement.key);
                             }}
                             onKeyDown={(event) => {
                               if (
@@ -2385,7 +2514,8 @@ export default function Home() {
                                 event.key === " "
                               ) {
                                 event.preventDefault();
-                                setSelectedPlacementKey(placement.key);
+                                if (event.ctrlKey || event.metaKey) togglePhoto(photo.id);
+                                else setSelectedPlacementKey(placement.key);
                               }
                             }}
                             onPointerDown={(event) => event.stopPropagation()}
@@ -2512,8 +2642,7 @@ export default function Home() {
 
           {layout.unplaced.length > 0 && (
             <div className="warning-banner" role="alert">
-              有 {layout.unplaced.length} 张照片的目标尺寸超过当前 A4
-              可用范围，请调小照片或边距后再导出。
+              有 {layout.unplaced.length} 张照片超过当前{paper.label}{settings.strictColumns ? "栏宽或页面高度" : "可用范围"}，请调小照片{settings.strictColumns ? "或减少栏数" : "或边距"}后再导出。
             </div>
           )}
 

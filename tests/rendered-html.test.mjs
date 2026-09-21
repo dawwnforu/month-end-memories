@@ -126,7 +126,7 @@ test("protects static text and local photos from casual copying", async () => {
   assert.match(page, /onDragStart=/);
   assert.match(page, /onContextMenu=/);
   assert.match(page, /draggable=\{false\}/);
-  assert.match(page, /本机处理 · 防误复制/);
+  assert.match(page, /原图留在本机/);
   assert.match(css, /user-select: none/);
   assert.match(css, /caret-color: transparent/);
   assert.match(css, /-webkit-user-drag: none/);
