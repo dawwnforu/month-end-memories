@@ -3,7 +3,19 @@ import test from "node:test";
 import { readFile } from "node:fs/promises";
 import vm from "node:vm";
 import ts from "typescript";
-import { duplicateGroups, uniquePhotos, fingerprintImage } from "../app/photo-tools.ts";
+import { duplicateGroups, uniquePhotos, fingerprintImage, originalPhotoName, suspectedDuplicateGroups } from "../app/photo-tools.ts";
+
+test("export timestamps reveal suspected duplicates without automatically deleting different pixels", () => {
+  const first = { name: "MVIMG_20260829_165518_44_2026-09-20_17-07-31_696.jpg", fingerprint: "a" };
+  const second = { name: "MVIMG_20260829_165518_44_2026-09-20_21-26-33_510.jpg", fingerprint: "b" };
+  const different = { name: "MVIMG_20260829_165519_44_2026-09-20_21-26-33_510.jpg", fingerprint: "c" };
+  assert.equal(originalPhotoName(first.name), originalPhotoName(second.name));
+  assert.deepEqual(suspectedDuplicateGroups([first, second, different]), [[first, second]]);
+  assert.deepEqual(uniquePhotos([first, second]), [first, second]);
+  assert.deepEqual(suspectedDuplicateGroups([first, { ...second, fingerprint: "a" }]), []);
+  assert.equal(originalPhotoName("photo (1).PNG"), originalPhotoName("photo.png"));
+  assert.notEqual(originalPhotoName("IMG_20260829_165518.jpg"), originalPhotoName("IMG_20260829_165519.jpg"));
+});
 
 test("packing emits each requested copy exactly once across multiple pages and rotations", async () => {
   const source = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
@@ -21,6 +33,28 @@ test("packing emits each requested copy exactly once across multiple pages and r
       assert.equal(new Set(keys).size, keys.length);
     }
   }
+});
+
+test("manual suspected-group cleanup retains the first photo, unrelated photos and an undo snapshot", async () => {
+  const source = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const implementation = source.slice(source.indexOf("  function removeDuplicates("), source.indexOf("  function rememberForUndo("));
+  const first = { id: "a", fingerprint: "a", quantity: 2 };
+  const extra = { id: "b", fingerprint: "b", quantity: 1 };
+  const other = { id: "c", fingerprint: "c", quantity: 1 };
+  const original = [first, extra, other];
+  let undo;
+  let updated;
+  const context = vm.createContext({
+    photosRef: { current: original }, uniquePhotos,
+    rememberForUndo: () => { undo = [...context.photosRef.current]; },
+    setPhotos: (next) => { updated = next; },
+    setSelectedPlacementKey() {}, setCropEditor() {}, setMessage() {},
+  });
+  vm.runInContext(ts.transpileModule(implementation, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText, context);
+  context.removeDuplicates([first, extra]);
+  assert.deepEqual(updated, [first, other]);
+  assert.deepEqual(undo, original);
+  assert.equal(updated[0].quantity, 2);
 });
 
 test("content identity survives renaming; cleanup preserves first photo and intentional copies", () => {

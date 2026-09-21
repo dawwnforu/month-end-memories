@@ -10,7 +10,7 @@ import {
   useState,
 } from "react";
 
-import { duplicateGroups, uniquePhotos, fingerprintImage } from "./photo-tools";
+import { duplicateGroups, uniquePhotos, fingerprintImage, suspectedDuplicateGroups, originalPhotoName } from "./photo-tools";
 
 type Photo = {
   id: string;
@@ -634,6 +634,7 @@ export default function Home() {
       : 0;
 
   const duplicates = useMemo(() => duplicateGroups(photos), [photos]);
+  const suspectedDuplicates = suspectedDuplicateGroups(photos);
   const extraPhotoCount = duplicates.reduce((count, group) => count + group.length - 1, 0);
   const locations = photos.flatMap((photo, index) => {
     const matches = layout.pages.flatMap((page, pageIndex) =>
@@ -673,9 +674,10 @@ export default function Home() {
     locatePhoto(searchResults[index]);
   }
 
-  function removeDuplicates() {
+  function removeDuplicates(group?: Photo[]) {
     const current = photosRef.current;
-    const next = uniquePhotos(current);
+    const removeIds = new Set(group?.slice(1).map((photo) => photo.id));
+    const next = group ? current.filter((photo) => !removeIds.has(photo.id)) : uniquePhotos(current);
     if (next.length === current.length) return;
     rememberForUndo();
     photosRef.current = next;
@@ -815,7 +817,7 @@ export default function Home() {
         setPhotos(next);
       }
       setSkippedDuplicates(skipped);
-      if (skipped.length) setDuplicateNotice(true);
+      if (skipped.length || (!allowDuplicateImages && suspectedDuplicateGroups(next).length)) setDuplicateNotice(true);
       setMessage(`已加入 ${addedCount} 张，跳过 ${skipped.length} 张重复图片${unreadableCount ? `，另有 ${unreadableCount} 张无法读取` : ""}。`);
     } catch {
       setMessage("图片读取失败，请重新选择。");
@@ -1461,10 +1463,30 @@ export default function Home() {
             <h2 id="duplicate-modal-title">重复图片检查</h2>
             <button type="button" aria-label="关闭重复图片检查" onClick={() => setDuplicateNotice(false)} autoFocus>×</button>
           </div>
-          <p>点击序号定位。当前有 {duplicates.length} 组重复图片，可清理 {extraPhotoCount} 张。每组保留最先导入的一张，保留其尺寸、裁剪和打印份数。</p>
-          <button type="button" disabled={!extraPhotoCount} onClick={removeDuplicates}>一键消除多余图片（{extraPhotoCount}）</button>
+          <p>完全相同：{duplicates.length} 组（多余 {extraPhotoCount} 张）；名称疑似：{suspectedDuplicates.length} 组。点击序号定位，清理时保留每组第一张的尺寸、裁剪和打印份数。</p>
+          <button type="button" disabled={!extraPhotoCount} onClick={() => removeDuplicates()}>一键消除完全相同图片（{extraPhotoCount}）</button>
           <button type="button" disabled={!undoDepth} onClick={undoLastAction}>撤销上一步</button>
           <div className="duplicate-results">
+            {suspectedDuplicates.length > 0 && <p>另有 {suspectedDuplicates.length} 组原始名称相同、像素不同的疑似重复图。已忽略文件末尾的导出时间和复制编号，请核对画面后再清理。</p>}
+            {suspectedDuplicates.map((group) => (
+              <div className="duplicate-group" key={`suspected-${group[0].id}`}>
+                <strong>疑似重复 · {originalPhotoName(group[0].name)}</strong>
+                {group.map((photo) => (
+                  <div key={photo.id}>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img className="duplicate-preview" src={photo.src} alt={photo.name} draggable={false} />
+                    <span>{photo.name}{photo.id === group[0].id ? "（保留）" : ""}</span>
+                    <small>{photo.naturalWidth} × {photo.naturalHeight} px</small>
+                    {locations.filter((result) => result.photo.id === photo.id).map((result) => (
+                      <button type="button" key={result.key} aria-pressed={activeResultKey === result.key} onClick={() => locatePhoto(result)}>
+                        #{result.index + 1} · {result.label}
+                      </button>
+                    ))}
+                  </div>
+                ))}
+                <button type="button" onClick={() => removeDuplicates(group)}>已核对：保留第一张，清理本组其余 {group.length - 1} 张</button>
+              </div>
+            ))}
             {duplicates.map((group) => (
               <div className="duplicate-group" key={group[0].id}>
                 <strong>相同图片 · {group.length} 张</strong>
@@ -1497,7 +1519,7 @@ export default function Home() {
                 ))}
               </div>
             )}
-            {!duplicates.length && !skippedDuplicates.length && <p>当前没有重复导入的图片。</p>}
+            {!duplicates.length && !suspectedDuplicates.length && !skippedDuplicates.length && <p>未发现完全相同或原始名称相同的图片；名称不同的相似画面尚不识别。</p>}
           </div>
         </section>
       )}
@@ -1905,7 +1927,7 @@ export default function Home() {
                       #{result.index + 1} · {result.photo.name} · {result.label}
                     </button>)}
                   </div>}
-                  <button type="button" onClick={() => setDuplicateNotice(true)}>检查重复图片（{extraPhotoCount} 张多余）</button>
+                  <button type="button" onClick={() => setDuplicateNotice(true)}>检查重复图片（{extraPhotoCount} 张相同 · {suspectedDuplicates.length} 组疑似）</button>
                 </div>
                 <div className="photo-list">
                   {photos.map((photo, index) => (

@@ -17,6 +17,28 @@ export function uniquePhotos<T extends { fingerprint: string }>(photos: T[]) {
   });
 }
 
+export function originalPhotoName(name: string) {
+  return name.normalize("NFC").toLocaleLowerCase()
+    .replace(/\.[^.]+$/, "")
+    .replace(/\s*\(\d+\)$/, "")
+    .replace(/_\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}_\d+$/, "")
+    .trim();
+}
+
+export function suspectedDuplicateGroups<T extends { name: string; fingerprint: string }>(photos: T[]) {
+  const groups = new Map<string, T[]>();
+  for (const photo of photos) {
+    const name = originalPhotoName(photo.name);
+    if (!name) continue;
+    const group = groups.get(name) ?? [];
+    group.push(photo);
+    groups.set(name, group);
+  }
+  return [...groups.values()].filter((group) =>
+    group.length > 1 && new Set(group.map((photo) => photo.fingerprint)).size > 1,
+  );
+}
+
 export async function fingerprintImage(image: HTMLImageElement) {
   const canvas = document.createElement("canvas");
   canvas.width = image.naturalWidth;
