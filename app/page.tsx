@@ -10,6 +10,8 @@ import {
   useState,
 } from "react";
 
+import { duplicateGroups, uniquePhotos, fingerprintImage } from "./photo-tools";
+
 type Photo = {
   id: string;
   name: string;
@@ -537,14 +539,6 @@ function loadBrowserImage(src: string) {
   });
 }
 
-async function fingerprintFile(file: File) {
-  const buffer = await file.arrayBuffer();
-  const digest = await crypto.subtle.digest("SHA-256", buffer);
-  return Array.from(new Uint8Array(digest), (byte) =>
-    byte.toString(16).padStart(2, "0"),
-  ).join("");
-}
-
 function isEditableTarget(target: EventTarget | null) {
   if (!(target instanceof HTMLElement)) return false;
   return (
@@ -567,9 +561,10 @@ export default function Home() {
   const [isExporting, setIsExporting] = useState(false);
   const [allowDuplicateImages, setAllowDuplicateImages] = useState(false);
   const [message, setMessage] = useState("");
-  const [duplicateNotice, setDuplicateNotice] = useState<{
-    count: number;
-  } | null>(null);
+  const [duplicateNotice, setDuplicateNotice] = useState(false);
+  const [skippedDuplicates, setSkippedDuplicates] = useState<Array<{ name: string; photoId: string }>>([]);
+  const [photoQuery, setPhotoQuery] = useState("");
+  const [activeResultKey, setActiveResultKey] = useState<string | null>(null);
   const [cropEditor, setCropEditor] = useState<{
     photoId: string;
     draft: CropArea;
@@ -593,7 +588,6 @@ export default function Home() {
     corner: ResizeCorner;
   } | null>(null);
   const objectUrls = useRef(new Set<string>());
-  const knownFingerprints = useRef(new Map<string, number>());
   const isImporting = useRef(false);
   const undoHistory = useRef<UndoSnapshot[]>([]);
   const photosRef = useRef(photos);
@@ -639,16 +633,56 @@ export default function Home() {
       ? Math.min(100, (usedArea / (usableArea * layout.pages.length)) * 100)
       : 0;
 
-  function rebuildKnownFingerprints(nextPhotos: Photo[]) {
-    const nextFingerprints = new Map<string, number>();
-    nextPhotos.forEach((photo) => {
-      nextFingerprints.set(
-        photo.fingerprint,
-        (nextFingerprints.get(photo.fingerprint) ?? 0) + 1,
-      );
-      objectUrls.current.add(photo.src);
-    });
-    knownFingerprints.current = nextFingerprints;
+  const duplicates = useMemo(() => duplicateGroups(photos), [photos]);
+  const extraPhotoCount = duplicates.reduce((count, group) => count + group.length - 1, 0);
+  const locations = photos.flatMap((photo, index) => {
+    const matches = layout.pages.flatMap((page, pageIndex) =>
+      page.placements.flatMap((placement, position) =>
+        placement.photoId === photo.id
+          ? [{ photo, key: placement.key, label: `第 ${pageIndex + 1} 页 · 第 ${position + 1} 张 · 第 ${placement.copy} 份`, index }]
+          : [],
+      ),
+    );
+    return matches.length ? matches : [{ photo, key: `unplaced-${photo.id}`, label: "未排入页面（尺寸过大）", index }];
+  });
+  const searchResults = photoQuery.trim()
+    ? locations.filter(({ photo }) => photo.name.toLocaleLowerCase().includes(photoQuery.trim().toLocaleLowerCase()))
+    : [];
+  const activeResultIndex = searchResults.findIndex((result) => result.key === activeResultKey);
+  const matchedPhotoIds = new Set(searchResults.map(({ photo }) => photo.id));
+
+  function locatePhoto(result: (typeof locations)[number]) {
+    setActiveResultKey(result.key);
+    setSelectedPlacementKey(result.key.startsWith("unplaced-") ? null : result.key);
+    const card = document.getElementById(`photo-card-${result.photo.id}`);
+    const list = card?.closest(".photo-list");
+    if (card && list) {
+      list.scrollTop += card.getBoundingClientRect().top - list.getBoundingClientRect().top;
+    }
+    const placed = document.getElementById(`placement-${result.key}`);
+    placed?.scrollIntoView({ block: "center", behavior: "smooth" });
+    if (!placed) card?.scrollIntoView({ block: "center", behavior: "smooth" });
+    setMessage(`${result.photo.name} · 图片 #${result.index + 1} · ${result.label}`);
+  }
+
+  function moveSearchResult(direction: number) {
+    if (!searchResults.length) return;
+    const index = activeResultIndex < 0
+      ? (direction > 0 ? 0 : searchResults.length - 1)
+      : (activeResultIndex + direction + searchResults.length) % searchResults.length;
+    locatePhoto(searchResults[index]);
+  }
+
+  function removeDuplicates() {
+    const current = photosRef.current;
+    const next = uniquePhotos(current);
+    if (next.length === current.length) return;
+    rememberForUndo();
+    photosRef.current = next;
+    setPhotos(next);
+    setSelectedPlacementKey(null);
+    setCropEditor(null);
+    setMessage(`已清理 ${current.length - next.length} 张多余图片，每组保留第一张；可按 Ctrl/⌘ + Z 撤销。`);
   }
 
   function rememberForUndo() {
@@ -672,7 +706,7 @@ export default function Home() {
       setMessage("目前没有可撤销的操作。");
       return;
     }
-    rebuildKnownFingerprints(snapshot.photos);
+    photosRef.current = snapshot.photos;
     setPhotos(snapshot.photos);
     setSettings(snapshot.settings);
     setSelectedPlacementKey(snapshot.selectedPlacementKey);
@@ -735,116 +769,54 @@ export default function Home() {
     );
 
     try {
-      const fingerprintedFiles = await Promise.all(
-        files.map(async (file) => ({
-          file,
-          fingerprint: await fingerprintFile(file),
-        })),
-      );
-      let importFiles = fingerprintedFiles;
-      let duplicateCount = 0;
-
-      if (!allowDuplicateImages) {
-        const incomingCounts = fingerprintedFiles.reduce(
-          (counts, { fingerprint }) => {
-            counts.set(fingerprint, (counts.get(fingerprint) ?? 0) + 1);
-            return counts;
-          },
-          new Map<string, number>(),
-        );
-        const acceptedFingerprints = new Set<string>();
-        const duplicateGroupTotals: number[] = [];
-        importFiles = fingerprintedFiles.filter(({ fingerprint }) => {
-          const existingCount =
-            knownFingerprints.current.get(fingerprint) ?? 0;
-          const isDuplicate =
-            existingCount > 0 || acceptedFingerprints.has(fingerprint);
-
-          if (isDuplicate) {
-            duplicateGroupTotals.push(
-              existingCount + (incomingCounts.get(fingerprint) ?? 0),
-            );
-            return false;
-          }
-
-          acceptedFingerprints.add(fingerprint);
-          return true;
-        });
-
-        duplicateCount = fingerprintedFiles.length - importFiles.length;
-        if (duplicateGroupTotals.length > 0) {
-          setDuplicateNotice({
-            count: Math.max(...duplicateGroupTotals),
+      const loaded: Photo[] = [];
+      const skipped: Array<{ name: string; photoId: string }> = [];
+      let unreadableCount = 0;
+      // Decode one image at a time so a large batch does not allocate all pixel buffers together.
+      for (const file of files) {
+        const src = URL.createObjectURL(file);
+        try {
+          const image = await loadBrowserImage(src);
+          const fingerprint = await fingerprintImage(image);
+          const ratio = image.naturalWidth / image.naturalHeight;
+          loaded.push({
+            id: crypto.randomUUID(), name: file.name, src, fingerprint, ratio,
+            rotationTurns: 0, manualRotation: false,
+            naturalWidth: image.naturalWidth, naturalHeight: image.naturalHeight,
+            widthMm: roundMm(ratio >= 1 ? 70 : 70 * ratio),
+            heightMm: roundMm(ratio >= 1 ? 70 / ratio : 70),
+            quantity: 1, lockAspectRatio: true,
+            crop: { x: 0, y: 0, width: 1, height: 1 },
           });
+        } catch {
+          URL.revokeObjectURL(src);
+          unreadableCount += 1;
         }
       }
 
-      const loaded = await Promise.all(
-        importFiles.map(
-          ({ file, fingerprint }) =>
-          new Promise<Photo | null>((resolve) => {
-            const src = URL.createObjectURL(file);
-            const image = new Image();
-            image.onload = () => {
-              objectUrls.current.add(src);
-              const ratio = image.naturalWidth / image.naturalHeight;
-              const longEdge = 70;
-              const widthMm = ratio >= 1 ? longEdge : longEdge * ratio;
-              const heightMm = ratio >= 1 ? longEdge / ratio : longEdge;
-              resolve({
-                id: crypto.randomUUID(),
-                name: file.name,
-                src,
-                fingerprint,
-                ratio,
-                rotationTurns: 0,
-                manualRotation: false,
-                naturalWidth: image.naturalWidth,
-                naturalHeight: image.naturalHeight,
-                widthMm: roundMm(widthMm),
-                heightMm: roundMm(heightMm),
-                quantity: 1,
-                lockAspectRatio: true,
-                crop: { x: 0, y: 0, width: 1, height: 1 },
-              });
-            };
-            image.onerror = () => {
-              URL.revokeObjectURL(src);
-              resolve(null);
-            };
-            image.src = src;
-          }),
-        ),
-      );
-
-      const validPhotos = loaded.filter(
-        (photo): photo is Photo => photo !== null,
-      );
-      if (validPhotos.length > 0) {
+      // Compare against the current collection after decoding, including edits made during import.
+      const next = [...photosRef.current];
+      for (const photo of loaded) {
+        if (!allowDuplicateImages) {
+          const existing = next.find((item) => item.fingerprint === photo.fingerprint);
+          if (existing) {
+            skipped.push({ name: photo.name, photoId: existing.id });
+            URL.revokeObjectURL(photo.src);
+            continue;
+          }
+        }
+        next.push(photo);
+        objectUrls.current.add(photo.src);
+      }
+      const addedCount = next.length - photosRef.current.length;
+      if (addedCount) {
         rememberForUndo();
+        photosRef.current = next;
+        setPhotos(next);
       }
-      validPhotos.forEach((photo) => {
-        knownFingerprints.current.set(
-          photo.fingerprint,
-          (knownFingerprints.current.get(photo.fingerprint) ?? 0) + 1,
-        );
-      });
-      setPhotos((current) => [...current, ...validPhotos]);
-
-      const unreadableCount = importFiles.length - validPhotos.length;
-      if (validPhotos.length === 0 && duplicateCount > 0 && unreadableCount === 0) {
-        setMessage(`已跳过 ${duplicateCount} 张重复照片。`);
-      } else if (duplicateCount > 0 || unreadableCount > 0) {
-        setMessage(
-          `已加入 ${validPhotos.length} 张，跳过 ${duplicateCount} 张重复照片${
-            unreadableCount > 0 ? `，另有 ${unreadableCount} 张无法读取` : ""
-          }。`,
-        );
-      } else {
-        setMessage(
-          `已加入 ${validPhotos.length} 张照片，正在重新计算最省纸排法。`,
-        );
-      }
+      setSkippedDuplicates(skipped);
+      if (skipped.length) setDuplicateNotice(true);
+      setMessage(`已加入 ${addedCount} 张，跳过 ${skipped.length} 张重复图片${unreadableCount ? `，另有 ${unreadableCount} 张无法读取` : ""}。`);
     } catch {
       setMessage("图片读取失败，请重新选择。");
     } finally {
@@ -936,17 +908,16 @@ export default function Home() {
     if (selectedPlacementKey?.startsWith(`${photoId}-`)) {
       setSelectedPlacementKey(null);
     }
-    setPhotos((current) => {
-      knownFingerprints.current.delete(target.fingerprint);
-      return current.filter((photo) => photo.id !== photoId);
-    });
+    const next = photosRef.current.filter((photo) => photo.id !== photoId);
+    photosRef.current = next;
+    setPhotos(next);
     setMessage(`已删除 ${target.name}，可按 Ctrl/⌘ + Z 撤销。`);
   }
 
   function clearPhotos() {
     if (!photosRef.current.length) return;
     rememberForUndo();
-    knownFingerprints.current.clear();
+    photosRef.current = [];
     setPhotos([]);
     setSelectedPlacementKey(null);
     setMessage("已清空照片，可按 Ctrl/⌘ + Z 撤销。");
@@ -1233,11 +1204,9 @@ export default function Home() {
     const handleShortcut = (event: KeyboardEvent) => {
       if (isEditableTarget(event.target)) return;
 
-      if (duplicateNotice) {
-        if (event.key === "Escape") {
-          event.preventDefault();
-          setDuplicateNotice(null);
-        }
+      if (duplicateNotice && event.key === "Escape") {
+        event.preventDefault();
+        setDuplicateNotice(false);
         return;
       }
 
@@ -1487,35 +1456,50 @@ export default function Home() {
       }}
     >
       {duplicateNotice && (
-        <div
-          className="duplicate-modal-layer"
-          role="presentation"
-          onMouseDown={() => setDuplicateNotice(null)}
-        >
-          <section
-            className="duplicate-modal"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="duplicate-modal-title"
-            aria-describedby="duplicate-modal-description"
-            onMouseDown={(event) => event.stopPropagation()}
-          >
-            <span className="duplicate-modal-mark" aria-hidden="true">
-              !
-            </span>
-            <h2 id="duplicate-modal-title">检测到客官上传了重复图片</h2>
-            <p id="duplicate-modal-description">
-              此图片已存在（共{duplicateNotice.count}张）
-            </p>
-            <button
-              type="button"
-              onClick={() => setDuplicateNotice(null)}
-              autoFocus
-            >
-              知道了
-            </button>
-          </section>
-        </div>
+        <section className="photo-finder-panel" role="dialog" aria-modal="false" aria-labelledby="duplicate-modal-title">
+          <div className="photo-finder-heading">
+            <h2 id="duplicate-modal-title">重复图片检查</h2>
+            <button type="button" aria-label="关闭重复图片检查" onClick={() => setDuplicateNotice(false)} autoFocus>×</button>
+          </div>
+          <p>点击序号定位。当前有 {duplicates.length} 组重复图片，可清理 {extraPhotoCount} 张。每组保留最先导入的一张，保留其尺寸、裁剪和打印份数。</p>
+          <button type="button" disabled={!extraPhotoCount} onClick={removeDuplicates}>一键消除多余图片（{extraPhotoCount}）</button>
+          <button type="button" disabled={!undoDepth} onClick={undoLastAction}>撤销上一步</button>
+          <div className="duplicate-results">
+            {duplicates.map((group) => (
+              <div className="duplicate-group" key={group[0].id}>
+                <strong>相同图片 · {group.length} 张</strong>
+                {group.map((photo) => (
+                  <div key={photo.id}>
+                    <span>{photo.name}{photo.id === group[0].id ? "（保留）" : "（多余）"}</span>
+                    {locations.filter((result) => result.photo.id === photo.id).map((result) => (
+                      <button type="button" key={result.key} aria-pressed={activeResultKey === result.key} onClick={() => locatePhoto(result)}>
+                        #{result.index + 1} · {result.label}
+                      </button>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            ))}
+            {skippedDuplicates.length > 0 && (
+              <div className="duplicate-group">
+                <strong>本次已阻止导入 {skippedDuplicates.length} 张重复图片</strong>
+                {skippedDuplicates.map((skipped, index) => (
+                  <div key={index}>
+                    <span>{skipped.name}（未加入版面）</span>
+                    {locations.some((result) => result.photo.id === skipped.photoId)
+                      ? locations.filter((result) => result.photo.id === skipped.photoId).map((result) => (
+                        <button type="button" key={result.key} aria-pressed={activeResultKey === result.key} onClick={() => locatePhoto(result)}>
+                          已有 #{result.index + 1} · {result.photo.name} · {result.label}
+                        </button>
+                      ))
+                      : <small>对应图片已移除</small>}
+                  </div>
+                ))}
+              </div>
+            )}
+            {!duplicates.length && !skippedDuplicates.length && <p>当前没有重复导入的图片。</p>}
+          </div>
+        </section>
       )}
       {cropEditor && cropPhoto && (
         <div
@@ -1875,7 +1859,7 @@ export default function Home() {
                 onChange={(event) => {
                   const allowed = event.target.checked;
                   setAllowDuplicateImages(allowed);
-                  if (allowed) setDuplicateNotice(null);
+                  if (allowed) setDuplicateNotice(false);
                   setMessage(
                     allowed
                       ? "已允许重复图片，再次导入相同照片时不会提醒。"
@@ -1902,11 +1886,33 @@ export default function Home() {
                   </div>
                 </div>
 
+                <div className="photo-search" role="search" aria-label="图片名称搜索">
+                  <label htmlFor="photo-search">查找图片</label>
+                  <input id="photo-search" type="search" placeholder="输入图片名称…"
+                    value={photoQuery} onChange={(event) => { setPhotoQuery(event.target.value); setActiveResultKey(null); }}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") { event.preventDefault(); moveSearchResult(event.shiftKey ? -1 : 1); }
+                      if (event.key === "Escape") { setPhotoQuery(""); setActiveResultKey(null); }
+                    }} />
+                  <div className="photo-search-actions">
+                    <span role="status">{photoQuery.trim() ? `${activeResultIndex + 1} / ${searchResults.length} 个位置` : "按名称查找，Enter 跳到下一处"}</span>
+                    <button type="button" disabled={!searchResults.length} aria-label="上一个查找结果" onClick={() => moveSearchResult(-1)}>↑</button>
+                    <button type="button" disabled={!searchResults.length} aria-label="下一个查找结果" onClick={() => moveSearchResult(1)}>↓</button>
+                  </div>
+                  {!!photoQuery.trim() && !searchResults.length && <p>没有找到匹配的图片</p>}
+                  {!!searchResults.length && <div className="photo-search-results">
+                    {searchResults.map((result) => <button type="button" key={result.key} aria-pressed={activeResultKey === result.key} onClick={() => locatePhoto(result)}>
+                      #{result.index + 1} · {result.photo.name} · {result.label}
+                    </button>)}
+                  </div>}
+                  <button type="button" onClick={() => setDuplicateNotice(true)}>检查重复图片（{extraPhotoCount} 张多余）</button>
+                </div>
                 <div className="photo-list">
                   {photos.map((photo, index) => (
                     <article
-                      className={`photo-card ${
-                        selectedPlacementKey?.startsWith(`${photo.id}-`)
+                      id={`photo-card-${photo.id}`}
+                      className={`photo-card ${matchedPhotoIds.has(photo.id) ? "is-search-match" : ""} ${
+                        selectedPlacementKey?.startsWith(`${photo.id}-`) || activeResultKey === `unplaced-${photo.id}`
                           ? "is-selected"
                           : ""
                       }`}
@@ -2318,7 +2324,8 @@ export default function Home() {
                           totalTurns === 1 || totalTurns === 3;
                         return (
                           <div
-                            className={`placed-photo ${
+                            id={`placement-${placement.key}`}
+                            className={`placed-photo ${matchedPhotoIds.has(photo.id) ? "is-search-match" : ""} ${
                               isSelected ? "is-selected" : ""
                             } ${
                               resizeDraft?.key === placement.key
