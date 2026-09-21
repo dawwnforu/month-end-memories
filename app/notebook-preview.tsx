@@ -121,7 +121,7 @@ export default function NotebookPreview({ photos, onSizeChange, imageStyle, chil
         </aside>
         <section className="notebook-stage" aria-label="本子排版预览">
           <p className="notebook-ruler">{book.width} × {book.height} mm · 方格 10 × 10 mm</p>
-          <div ref={page} className="notebook-page" style={{ width: `min(100%, ${book.width / book.height * 65}vh)`, aspectRatio: `${book.width} / ${book.height}`, backgroundSize: `${1000 / book.width}% ${1000 / book.height}%` }}>
+          <div ref={page} className="notebook-page" style={{ width: `min(100%, ${book.width / book.height * 45}vh)`, aspectRatio: `${book.width} / ${book.height}`, backgroundSize: `${1000 / book.width}% ${1000 / book.height}%` }}>
             {visibleItems.map((item) => {
               const photo = photos.find((entry) => entry.id === item.photoId)!;
               const size = draft?.photoId === photo.id ? draft : { width: photo.widthMm, height: photo.heightMm };
