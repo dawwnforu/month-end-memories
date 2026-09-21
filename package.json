@@ -1,6 +1,6 @@
 {
   "name": "month-end-memories",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "月末拾光：自动旋转、实时重排并导出 300 DPI A4 PDF 的照片省纸排版工具。",
   "private": true,
   "homepage": "https://yuemo-photo-sheet.dawwnforu.chatgpt.site",
